@@ -126,7 +126,23 @@ class App:
 
     # ---------- build ----------
     def build(self):
+        """Build the window. "auto" size: medium, or small when medium does not fit the screen."""
         reopen = self.settings_panel is not None
+        chosen = self.s["size"]
+        for self.size_name in ("medium", "small") if chosen == "auto" else (chosen,):
+            self._build_widgets()
+            if self.size_name == "small" or self.fits_screen():
+                break
+        if reopen:
+            self.toggle_settings()
+
+    def fits_screen(self):
+        self.root.update_idletasks()
+        # room for the title bar and a taskbar/dock
+        return (self.root.winfo_reqwidth() <= self.root.winfo_screenwidth() - 16
+                and self.root.winfo_reqheight() <= self.root.winfo_screenheight() - 90)
+
+    def _build_widgets(self):
         for child in self.root.winfo_children():
             child.destroy()
         self.settings_panel = None
@@ -150,8 +166,6 @@ class App:
         self.build_topbar()
         self.build_screens()
         self.update_conn_ui()
-        if reopen:
-            self.toggle_settings()
 
     def layout_model(self):
         if self.s["model"] != "auto":
@@ -159,7 +173,7 @@ class App:
         return self.detected_model or "EX5"
 
     def sizes(self):
-        k = SCALE[self.s["size"]]
+        k = SCALE[self.size_name]
         return {name: (int(w * k) // 2 * 2, int(h * k) // 2 * 2) for name, (w, h) in BASE.items()}
 
     def build_topbar(self):
@@ -243,7 +257,7 @@ class App:
         head.pack(fill="x")
         self.peak_label = tk.Label(head, bg=pal["panel2"], fg=pal["muted"], font=self.f_tiny)
         self.peak_label.pack(side="right")  # packed first: keeps its room when the box is narrow
-        if self.s["size"] != "small":  # no room for the caption next to the peak in the small window
+        if self.size_name != "small":  # no room for the caption next to the peak in the small window
             tk.Label(head, text=t("history", s=self.s["graph_seconds"]), bg=pal["panel2"], fg=pal["muted"],
                      font=self.f_tiny).pack(side="left")
         self.graph = tk.Canvas(right, height=40, bg=pal["panel2"], highlightthickness=0)

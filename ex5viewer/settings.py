@@ -9,7 +9,7 @@ log = logging.getLogger(__name__)
 DEFAULTS = {
     "language": "th",          # th / en
     "theme": "oled",           # oled / dark
-    "size": "medium",          # small / medium / large
+    "size": "auto",            # auto (medium, small when the screen is too small) / small / medium / large
     "topmost": False,
     "port": 5566,              # this car's adb port; plain IPs get it appended
     "auto_connect": True,
@@ -30,7 +30,7 @@ DEFAULTS = {
 }
 
 CHOICES = {
-    "language": ["th", "en"], "theme": ["oled", "dark"], "size": ["small", "medium", "large"],
+    "language": ["th", "en"], "theme": ["oled", "dark"], "size": ["auto", "small", "medium", "large"],
     "max_fps": [15, 30, 60], "cluster_interval": [0.5, 1.0, 2.0, 5.0], "graph_seconds": [30, 60, 120],
     "link": ["wifi", "usb"], "model": ["auto", "EX5", "EX2"],
 }

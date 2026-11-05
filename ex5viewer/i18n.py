@@ -61,6 +61,7 @@ STRINGS = {
     "theme_oled": ("ดำสนิท", "OLED"),
     "theme_dark": ("มืด", "Dark"),
     "s_size": ("ขนาดหน้าต่าง", "Window size"),
+    "size_auto": ("อัตโนมัติ", "Auto"),
     "size_small": ("เล็ก", "S"),
     "size_medium": ("กลาง", "M"),
     "size_large": ("ใหญ่", "L"),
