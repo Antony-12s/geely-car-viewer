@@ -1,0 +1,89 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04      # oldest glibc we target: the binary runs on newer distros too
+            target: linux
+            asset: EX5Viewer-linux-x86_64.tar.gz
+          - os: windows-latest
+            target: windows
+            asset: EX5Viewer-windows-x64.zip
+          - os: macos-14          # Apple Silicon
+            target: darwin
+            asset: EX5Viewer-macos-arm64.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pytest
+      - name: Fetch scrcpy-server and adb
+        run: python scripts/fetch_deps.py --os ${{ matrix.target }}
+      - name: Tests
+        run: python -m pytest -q tests/test_core.py
+      - name: Build
+        run: pyinstaller --noconfirm ex5viewer.spec
+
+      - name: Self-test (Linux)
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb fonts-noto-core > /dev/null
+          xvfb-run -s "-screen 0 1920x1080x24" dist/EX5Viewer/EX5Viewer --selftest --screenshot selftest-linux.png
+      - name: Self-test (Windows)
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process dist/EX5Viewer/EX5Viewer.exe -ArgumentList "--selftest","--screenshot","selftest-windows.png" -Wait -PassThru
+          Get-Content "$env:APPDATA/ex5-viewer/selftest.txt"
+          if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+      - name: Self-test (macOS)
+        if: matrix.target == 'darwin'
+        run: |
+          dist/EX5Viewer.app/Contents/MacOS/EX5Viewer --selftest --screenshot selftest-macos.png
+          cat "$HOME/Library/Application Support/ex5-viewer/selftest.txt"
+
+      - name: Package (Linux)
+        if: matrix.target == 'linux'
+        run: |
+          cp packaging/install-linux.sh packaging/icon.png dist/EX5Viewer/
+          tar -C dist -czf ${{ matrix.asset }} EX5Viewer
+      - name: Package (Windows)
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/EX5Viewer -DestinationPath ${{ matrix.asset }}
+      - name: Package (macOS)
+        if: matrix.target == 'darwin'
+        run: |
+          codesign --force --deep --sign - dist/EX5Viewer.app   # ad-hoc: required on Apple Silicon
+          ditto -c -k --keepParent dist/EX5Viewer.app ${{ matrix.asset }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ matrix.asset }}
+            selftest-*.png
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}
+          body_path: RELEASE_NOTES.md

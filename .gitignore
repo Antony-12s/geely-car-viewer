@@ -1,0 +1,8 @@
+.venv/
+build/
+dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+ex5viewer/resources/scrcpy-server
+ex5viewer/resources/platform-tools/
