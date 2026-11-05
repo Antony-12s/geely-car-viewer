@@ -51,7 +51,9 @@ jobs:
         if: matrix.target == 'windows'
         shell: pwsh
         run: |
-          $p = Start-Process dist/EX5Viewer/EX5Viewer.exe -ArgumentList "--selftest","--screenshot","selftest-windows.png" -Wait -PassThru
+          # -Wait would also wait for the adb server daemon the app starts, which never exits
+          $p = Start-Process dist/EX5Viewer/EX5Viewer.exe -ArgumentList "--selftest","--screenshot","selftest-windows.png" -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Error "selftest timed out"; exit 1 }
           Get-Content "$env:APPDATA/ex5-viewer/selftest.txt"
           if ($p.ExitCode -ne 0) { exit $p.ExitCode }
       - name: Self-test (macOS)
