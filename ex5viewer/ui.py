@@ -1,4 +1,4 @@
-"""EX5 Viewer window: top bar (connection, network graph, PC/car meters, settings) + one bezel per screen."""
+"""Geely Car Viewer window: top bar (connection, network graph, PC/car meters, settings) + one bezel per screen."""
 import logging
 import os
 import queue
@@ -172,7 +172,7 @@ class App:
         self.f_num, self.f_num_bold = (mono, 9), (mono, 10, "bold")   # numbers: IP, rates, fps, meters
         self.root.configure(bg=pal["bg"])
         self.root.option_add("*Font", self.f_body)
-        self.root.title("EX5 Viewer")
+        self.root.title("Geely Car Viewer")
         icon = paths.resource_dir() / "icon.png"
         if icon.is_file():
             self._icon = tk.PhotoImage(file=str(icon))
@@ -725,7 +725,7 @@ class App:
             server = paths.find_server()
         except FileNotFoundError as error:
             server = str(error)
-        messagebox.showinfo("EX5 Viewer", f"adb:\n{adb.ADB}\n\nscrcpy-server:\n{server}\n\nlog / settings:\n{paths.config_dir()}",
+        messagebox.showinfo("Geely Car Viewer", f"adb:\n{adb.ADB}\n\nscrcpy-server:\n{server}\n\nlog / settings:\n{paths.config_dir()}",
                             parent=self.root)
 
     def open_log(self):

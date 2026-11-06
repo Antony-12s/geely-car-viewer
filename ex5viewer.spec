@@ -12,10 +12,10 @@ a = Analysis(
     excludes=["numpy", "pytest"],
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="EX5Viewer", console=False,
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="GeelyCarViewer", console=False,
           icon="packaging/icon.ico" if sys.platform.startswith("win") else None)
-coll = COLLECT(exe, a.binaries, a.datas, name="EX5Viewer")
+coll = COLLECT(exe, a.binaries, a.datas, name="GeelyCarViewer")
 if is_mac:
-    app = BUNDLE(coll, name="EX5Viewer.app", icon="packaging/icon.icns",
-                 bundle_identifier="com.antony12s.ex5viewer",
-                 info_plist={"NSHighResolutionCapable": True, "CFBundleShortVersionString": "1.0.1"})
+    app = BUNDLE(coll, name="GeelyCarViewer.app", icon="packaging/icon.icns",
+                 bundle_identifier="com.antony12s.geelycarviewer",
+                 info_plist={"NSHighResolutionCapable": True, "CFBundleShortVersionString": "1.1.0"})

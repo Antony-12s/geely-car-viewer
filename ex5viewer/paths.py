@@ -4,7 +4,7 @@ import shutil
 import sys
 from pathlib import Path
 
-APP = "ex5-viewer"
+APP = "ex5-viewer"  # kept from the old name so existing settings and logs carry over
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
 EXE = ".exe" if IS_WIN else ""

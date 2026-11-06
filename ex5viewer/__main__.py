@@ -1,4 +1,4 @@
-"""Entry point: `python -m ex5viewer` or the frozen EX5Viewer executable.
+"""Entry point: `python -m ex5viewer` or the frozen GeelyCarViewer executable.
 
 --selftest        open the window, decode the bundled clip into every screen, check adb, exit 0/1
 --screenshot PNG  with --selftest: save the window (used by CI on all three OSes)

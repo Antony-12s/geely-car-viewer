@@ -59,7 +59,7 @@ class SettingsPanel(tk.Frame):
         tk.Frame(self, bg=pal["line"], height=1).pack(fill="x", pady=(12, 10))
         foot = tk.Frame(self, bg=self["bg"])
         foot.pack(fill="x")
-        tk.Label(foot, text=f"EX5 Viewer {__version__}", bg=self["bg"], fg=pal["muted"], font=app.f_small).pack(side="left")
+        tk.Label(foot, text=f"Geely Car Viewer {__version__}", bg=self["bg"], fg=pal["muted"], font=app.f_small).pack(side="left")
         for text, command in ((t("open_log"), app.open_log), (t("tool_paths"), app.show_paths)):
             self.link(foot, text, command).pack(side="left", padx=(14, 0))
         self.link(foot, t("reset"), app.reset_settings).pack(side="right")

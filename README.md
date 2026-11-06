@@ -1,4 +1,6 @@
-# EX5 Viewer
+# Geely Car Viewer
+
+(เดิมชื่อ EX5 Viewer) · ดูว่ามีอะไรใหม่ใน [CHANGELOG.md](CHANGELOG.md)
 
 ดูจอรถ Geely EX5 บนคอม: **จอกลาง + HUD + หน้าปัด** ในหน้าต่างเดียว ต่อผ่าน adb ทาง Wi‑Fi หรือ USB
 Mirror the Geely EX5 main screen, HUD and instrument cluster in one window over adb (Wi‑Fi or USB).
@@ -6,15 +8,15 @@ Mirror the Geely EX5 main screen, HUD and instrument cluster in one window over 
 ## ใช้งาน / Usage
 
 1. เปิด adb บนหัวรถ (EX5 ใช้พอร์ต `5566`) / enable adb on the head unit
-2. เปิด EX5 Viewer → เลือก Wi‑Fi (พิมพ์ IP) หรือ USB → **เชื่อมต่อ**
+2. เปิด Geely Car Viewer → เลือก Wi‑Fi (พิมพ์ IP) หรือ USB → **เชื่อมต่อ**
 3. สวิตช์ **ควบคุม** ใต้จอกลาง = คลิก/ลากบนภาพแล้วกดในรถจริง
 4. ⚙ ตั้งค่า: ภาษา, ธีม, ขนาดหน้าต่าง, fps, รีเฟรชหน้าปัด, กราฟเน็ต ฯลฯ (บันทึกเองทันที)
 
 | OS | ไฟล์ | หมายเหตุ |
 |---|---|---|
-| Windows 10/11 x64 | `EX5Viewer-windows-x64.zip` | แตกไฟล์แล้วเปิด `EX5Viewer.exe` (SmartScreen: More info → Run anyway) |
-| Linux x86_64 | `EX5Viewer-linux-x86_64.tar.gz` | แตกไฟล์ → `./EX5Viewer` · `./install-linux.sh` เพิ่มเข้าเมนูแอป |
-| macOS (Apple Silicon) | `EX5Viewer-macos-arm64.zip` | ไม่ได้ sign: คลิกขวา → Open ครั้งแรก |
+| Windows 10/11 x64 | `GeelyCarViewer-windows-x64.zip` | แตกไฟล์แล้วเปิด `GeelyCarViewer.exe` (SmartScreen: More info → Run anyway) |
+| Linux x86_64 | `GeelyCarViewer-linux-x86_64.tar.gz` | แตกไฟล์ → `./GeelyCarViewer` · `./install-linux.sh` เพิ่มเข้าเมนูแอป |
+| macOS (Apple Silicon) | `GeelyCarViewer-macos-arm64.zip` | ไม่ได้ sign: คลิกขวา → Open ครั้งแรก |
 
 ## อะไรทำงานยังไง / How it works
 
@@ -32,7 +34,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt pyinstaller py
 .venv/bin/python scripts/fetch_deps.py          # scrcpy-server (hash-checked) + adb
 .venv/bin/python -m pytest -q tests/test_core.py
 .venv/bin/python -m ex5viewer                   # run
-.venv/bin/pyinstaller ex5viewer.spec            # dist/EX5Viewer
+.venv/bin/pyinstaller ex5viewer.spec            # dist/GeelyCarViewer
 ```
 
 Release: push tag `vX.Y.Z` → GitHub Actions builds Windows / Linux / macOS, runs `--selftest` on each, attaches the zips.
