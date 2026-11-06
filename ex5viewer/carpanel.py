@@ -152,8 +152,10 @@ class CarPanel(tk.Canvas):
         line2 = sy + 26
         if gps:
             angle = gps["heading"]
-            self.create_text(sx, line2, text=f"GPS ✓  {angle:.0f}° {compass(angle)}", anchor="w", fill=pal["text"],
-                             font=app.f_small)
+            moving = gps.get("speed", 0) > 0.5 or (car.get("speed_kmh") or 0) > 2
+            # heading is 0 while parked: say "parked" instead of a meaningless "0° N"
+            where = f"{angle:.0f}° {compass(angle)}" if moving else t("c_parked")
+            self.create_text(sx, line2, text=f"GPS ✓  {where}", anchor="w", fill=pal["text"], font=app.f_small)
             mx = x + w - 14
             label = self.create_text(mx, line2, text=t("c_map") + " ↗", anchor="e", fill=pal["accent"],
                                      font=app.f_small, tags="map")

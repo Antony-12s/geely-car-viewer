@@ -102,12 +102,12 @@ def parse_position(line):
     match = POSITION.search(line)
     if not match:
         return None
-    lat, lon, alt, _speed, heading = map(float, match.groups())
+    lat, lon, alt, speed, heading = map(float, match.groups())
     if abs(lat) > 90 or abs(lon) > 180:
         lat, lon = lat / 3.6e6, lon / 3.6e6
     if (lat, lon) == (0.0, 0.0) or not (math.isfinite(lat) and math.isfinite(lon)):
         return None
-    return {"lat": lat, "lon": lon, "alt": alt, "heading": heading % 360, "time": time.monotonic()}
+    return {"lat": lat, "lon": lon, "alt": alt, "speed": speed, "heading": heading % 360, "time": time.monotonic()}
 
 
 def compass(degrees):

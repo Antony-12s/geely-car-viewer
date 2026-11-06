@@ -235,8 +235,9 @@ class HostStats:
         self._freq = None
         if self._rc6:
             card = self._rc6.split("/gt/")[0].split("/power/")[0]
-            self._freq = next((p for p in (os.path.join(os.path.dirname(self._rc6), "rps_act_freq_mhz"),
-                                           os.path.join(card, "gt_act_freq_mhz")) if os.path.exists(p)), None)
+            # cur, not act: act reads 0 whenever the GPU naps between frames, so the value kept vanishing
+            self._freq = next((p for p in (os.path.join(os.path.dirname(self._rc6), "rps_cur_freq_mhz"),
+                                           os.path.join(card, "gt_cur_freq_mhz")) if os.path.exists(p)), None)
         self._nvidia = shutil.which("nvidia-smi") if not self._rc6 else None
 
     def _gpu_mhz(self):

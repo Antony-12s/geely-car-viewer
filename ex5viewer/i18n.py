@@ -74,6 +74,7 @@ STRINGS = {
     "c_show": ("แสดงเลขเต็ม", "Show numbers"),
     "c_hide": ("ซ่อนเลข", "Hide numbers"),
     "c_copied": ("คัดลอก {name} แล้ว", "Copied {name}"),
+    "c_parked": ("จอดอยู่", "parked"),
     "c_map": ("แผนที่", "Map"),
     "c_since_boot": ("รวมตั้งแต่เปิดรถ {n}", "{n} since start"),
     "s_show_vehicle": ("แสดงข้อมูลรถ", "Car panel"),
