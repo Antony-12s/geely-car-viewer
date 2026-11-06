@@ -1,35 +1,50 @@
 # Changelog
 
+## 1.1.1
+
+### New
+- **Resize by dragging** the window corner (or maximise). The screens and car panel rescale to fit, and the size is remembered. Picking a size preset in ⚙ Settings goes back to that size.
+- **Motion** across the app:
+  - switches slide, and the selected option in segmented controls glides to the new choice
+  - CPU / GPU / RAM bars and the car panel numbers (battery, range, speed, tires) count smoothly to new values
+  - the status dot pulses while connecting or reconnecting
+  - the settings panel slides in; the T-Box info window fades in (where the desktop supports transparency)
+  - ⚙ Settings → **Animations** turns it all off for slow computers
+
+### Notes
+- The smallest drag size is the "small" preset (~1000 × 676); below that the top bar no longer fits.
+- The car GPU figure is for the whole GPU (Mali-G76, 10 cores), as busy time at the current clock. Read it together with the MHz shown next to it.
+
 ## 1.1.0 — Geely Car Viewer
 
-ชื่อใหม่: **EX5 Viewer → Geely Car Viewer** (ตั้งค่าเดิมใช้ต่อได้เลย ไม่ต้องตั้งใหม่)
+New name: **EX5 Viewer → Geely Car Viewer**. Existing settings carry over.
 
-### ใหม่
-- **แถบข้อมูลรถ** ใต้แถบบน (ปิดได้ใน ⚙ "แสดงข้อมูลรถ")
-  - แบตเตอรี่ % กับระยะที่วิ่งได้ ตรงกับหน้าปัดรถ, เสียบชาร์จแล้วขึ้น "กำลังชาร์จ X kW"
-  - เกียร์ P/R/N/D, ความเร็ว, เลขไมล์
-  - ลมยาง 4 ล้อบนรูปรถ ล้อที่ลมอ่อน/แข็ง/ต่างจากล้ออื่นเกิน 3 psi ขึ้นสีเหลือง
-  - อุณหภูมิตามหน้าปัด
-- **T-Box (กล่อง 4G ของรถ)**
-  - ขีดสัญญาณ 4G และชื่อเครือข่ายจริงจากซิม (เช่น TrueMove H)
-  - GPS ของ T-Box: ทิศตอนขับ, "จอดอยู่" ตอนจอด, ปุ่ม **แผนที่ ↗** เปิด Google Maps
-  - เน็ตที่รถใช้ผ่าน T-Box: อัตราตอนนี้กับยอดรวมตั้งแต่สตาร์ตรถ
-  - ปุ่ม **ข้อมูล T-Box ⓘ**: เลขชิ้นส่วน/firmware ของกล่อง, ICCID ของ eSIM, IMEI (ซ่อนเลขไว้จนกด "แสดงเลขเต็ม", คลิกค่าเพื่อคัดลอก)
-- **GPU แสดงความถี่** คู่กับ % ทั้งคอมและหัวรถ (เช่น `64% 850M`)
-- **ขนาดหน้าต่าง "อัตโนมัติ"** (ค่าเริ่มต้น): ใช้ขนาดกลาง ถ้าจอเล็กเกินลดเป็นขนาดเล็กเอง
+### New
+- **Car panel** under the top bar (can be hidden in ⚙ "Car panel")
+  - battery % and range, matching the car's cluster; "Charging X kW" when plugged in
+  - gear P/R/N/D, speed, odometer
+  - tire pressure for all 4 wheels on a top-view car; a wheel turns yellow when low, high, or 3 psi off the others
+  - outside temperature as shown on the cluster
+- **T-Box (the car's 4G box)**
+  - 4G signal bars and the real carrier from the eSIM (e.g. TrueMove H)
+  - T-Box GPS: heading while driving, "parked" while parked, and a **Map ↗** button that opens Google Maps
+  - data the car uses through the T-Box: current rate and total since the car started
+  - **T-Box info ⓘ**: box part and firmware numbers, eSIM ICCID, IMEI (masked until "Show numbers"; click a value to copy)
+- **GPU clock** next to GPU % for both the PC and the car (e.g. `64% 850M`)
+- **"Auto" window size** (default): medium, or small when the screen is too small
 
-### ดีขึ้น
-- หน้าตาใหม่ทั้งแอป: การ์ดขอบมนชุดเดียวกัน, คอลัมน์ตรงกันทุกแถว, ตัวเลขใหญ่อ่านง่าย, หน้าจอว่างมีข้อความบอก
-- จอขนาดกลาง/ใหญ่ใหญ่ขึ้น 10%
-- หน้าปัด (Cluster) เร็วขึ้น: ส่งภาพเป็น JPEG ~20 KB แทน 4 MB, ตั้ง 0.5 วิได้จริง ~1.7 ภาพ/วิ
+### Improved
+- New look across the app: one rounded card style, aligned columns, larger readable numbers, clear empty states
+- Medium and large windows are 10% bigger
+- Faster cluster view: JPEG frames of ~20 KB instead of a 4 MB BMP; a 0.5 s refresh really gives ~1.7 frames/s
 
-### แก้บั๊ก
-- GPU ของหัวรถขึ้น "–" ตลอด
-- เปิด/ปิดหน้าปัดแล้วทิ้ง process กับไฟล์ 4 MB ค้างไว้บนรถ
-- การเชื่อมต่อหน้าปัดพังตอนปิด ทำให้ต่อใหม่ไม่ติดเป็นพัก
-- ชื่อเครือข่าย T-Box ขึ้น "China Mobile" ผิด
-- ความถี่ GPU ของคอม (Intel) หายเป็นพัก ๆ
-- ถ้ารถกำลังดับ แถบ CPU/ping ไม่ค้างตามอีกแล้ว
+### Fixed
+- Car GPU always showed "–"
+- Opening and closing the cluster view left processes and a 4 MB file behind on the car
+- The cluster connection broke on close, so reconnecting failed for a while
+- The T-Box carrier showed "China Mobile" by mistake
+- The PC (Intel) GPU clock kept disappearing
+- While the car powers down, the CPU / ping meters no longer freeze
 
 ## 1.0.0
-- รุ่นแรก: จอกลาง + HUD + หน้าปัดในหน้าต่างเดียว, ต่อ Wi‑Fi/USB, ควบคุมจอกลาง, กราฟเน็ต, CPU/GPU/RAM ของคอมและหัวรถ, ตั้งค่า, เลือก EX5/EX2
+- First release: main screen + HUD + cluster in one window, Wi-Fi / USB connection, main screen touch control, network graph, PC and car CPU / GPU / RAM, settings, EX5 / EX2 model choice

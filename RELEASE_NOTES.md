@@ -1,37 +1,25 @@
-## Geely Car Viewer 1.1.0
-ชื่อใหม่: **EX5 Viewer → Geely Car Viewer** (ตั้งค่าเดิมใช้ต่อได้เลย ไม่ต้องตั้งใหม่)
+## Geely Car Viewer 1.1.1
 
-### ใหม่
-- **แถบข้อมูลรถ** ใต้แถบบน (ปิดได้ใน ⚙ "แสดงข้อมูลรถ")
-  - แบตเตอรี่ % กับระยะที่วิ่งได้ ตรงกับหน้าปัดรถ, เสียบชาร์จแล้วขึ้น "กำลังชาร์จ X kW"
-  - เกียร์ P/R/N/D, ความเร็ว, เลขไมล์
-  - ลมยาง 4 ล้อบนรูปรถ ล้อที่ลมอ่อน/แข็ง/ต่างจากล้ออื่นเกิน 3 psi ขึ้นสีเหลือง
-  - อุณหภูมิตามหน้าปัด
-- **T-Box (กล่อง 4G ของรถ)**
-  - ขีดสัญญาณ 4G และชื่อเครือข่ายจริงจากซิม (เช่น TrueMove H)
-  - GPS ของ T-Box: ทิศตอนขับ, "จอดอยู่" ตอนจอด, ปุ่ม **แผนที่ ↗** เปิด Google Maps
-  - เน็ตที่รถใช้ผ่าน T-Box: อัตราตอนนี้กับยอดรวมตั้งแต่สตาร์ตรถ
-  - ปุ่ม **ข้อมูล T-Box ⓘ**: เลขชิ้นส่วน/firmware ของกล่อง, ICCID ของ eSIM, IMEI (ซ่อนเลขไว้จนกด "แสดงเลขเต็ม", คลิกค่าเพื่อคัดลอก)
-- **GPU แสดงความถี่** คู่กับ % ทั้งคอมและหัวรถ (เช่น `64% 850M`)
-- **ขนาดหน้าต่าง "อัตโนมัติ"** (ค่าเริ่มต้น): ใช้ขนาดกลาง ถ้าจอเล็กเกินลดเป็นขนาดเล็กเอง
 
-### ดีขึ้น
-- หน้าตาใหม่ทั้งแอป: การ์ดขอบมนชุดเดียวกัน, คอลัมน์ตรงกันทุกแถว, ตัวเลขใหญ่อ่านง่าย, หน้าจอว่างมีข้อความบอก
-- จอขนาดกลาง/ใหญ่ใหญ่ขึ้น 10%
-- หน้าปัด (Cluster) เร็วขึ้น: ส่งภาพเป็น JPEG ~20 KB แทน 4 MB, ตั้ง 0.5 วิได้จริง ~1.7 ภาพ/วิ
+### New
+- **Resize by dragging** the window corner (or maximise). The screens and car panel rescale to fit, and the size is remembered. Picking a size preset in ⚙ Settings goes back to that size.
+- **Motion** across the app:
+  - switches slide, and the selected option in segmented controls glides to the new choice
+  - CPU / GPU / RAM bars and the car panel numbers (battery, range, speed, tires) count smoothly to new values
+  - the status dot pulses while connecting or reconnecting
+  - the settings panel slides in; the T-Box info window fades in (where the desktop supports transparency)
+  - ⚙ Settings → **Animations** turns it all off for slow computers
 
-### แก้บั๊ก
-- GPU ของหัวรถขึ้น "–" ตลอด
-- เปิด/ปิดหน้าปัดแล้วทิ้ง process กับไฟล์ 4 MB ค้างไว้บนรถ
-- การเชื่อมต่อหน้าปัดพังตอนปิด ทำให้ต่อใหม่ไม่ติดเป็นพัก
-- ชื่อเครือข่าย T-Box ขึ้น "China Mobile" ผิด
-- ความถี่ GPU ของคอม (Intel) หายเป็นพัก ๆ
-- ถ้ารถกำลังดับ แถบ CPU/ping ไม่ค้างตามอีกแล้ว
+### Notes
+- The smallest drag size is the "small" preset (~1000 × 676); below that the top bar no longer fits.
+- The car GPU figure is for the whole GPU (Mali-G76, 10 cores), as busy time at the current clock. Read it together with the MHz shown next to it.
 
-| ไฟล์ | |
+Full history: [CHANGELOG.md](https://github.com/Antony-12s/geely-car-viewer/blob/main/CHANGELOG.md)
+
+| File | |
 |---|---|
-| `GeelyCarViewer-windows-x64.zip` | Windows 10/11 · SmartScreen อาจเตือน: More info → Run anyway |
-| `GeelyCarViewer-linux-x86_64.tar.gz` | Ubuntu 22.04+ · `./install-linux.sh` เพิ่มเข้าเมนู |
-| `GeelyCarViewer-macos-arm64.zip` | Mac Apple Silicon · ครั้งแรก: คลิกขวา → Open |
+| `GeelyCarViewer-windows-x64.zip` | Windows 10/11 · SmartScreen may warn: More info → Run anyway |
+| `GeelyCarViewer-linux-x86_64.tar.gz` | Ubuntu 22.04+ · run `./install-linux.sh` to add it to the app menu |
+| `GeelyCarViewer-macos-arm64.zip` | Apple Silicon Mac · first launch: right-click → Open |
 
-ต้องเปิด adb บนหัวรถ · หน้าปัดต้องมี root (`su`) · ข้อมูลรถ/T-Box อ่านอย่างเดียว ไม่ส่งคำสั่งเข้ารถ
+Requires adb enabled on the head unit. The cluster view needs root (`su`) on the head unit. Car and T-Box data are read-only; nothing is sent to the car.
