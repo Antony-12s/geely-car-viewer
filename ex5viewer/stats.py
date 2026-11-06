@@ -89,7 +89,7 @@ def mem_used(meminfo):
 CAR_GPU_FILES = [
     "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",        # Qualcomm Adreno: "37 %"
     "/sys/kernel/gpu/gpu_busy",                             # some vendor kernels: "37 %"
-    "/sys/class/misc/mali0/device/utilization",             # Mali
+    "/sys/class/misc/mali0/device/utilisation",             # Mali (EX5 SE1000, Mali-G76): "gpu utilisation    : 58", no root
     "/sys/kernel/debug/pvr/status",                         # PowerVR (needs debugfs)
 ]
 

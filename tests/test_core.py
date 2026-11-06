@@ -184,7 +184,8 @@ def test_cpu_and_memory_parsing():
     assert stats.cpu_percent(before, after) == pytest.approx(50.0)
     used, total = stats.mem_used("MemTotal: 8000 kB\nMemFree: 1000 kB\nMemAvailable: 2000 kB\n")
     assert (used, total) == (6000 * 1024, 8000 * 1024)
-    assert stats.parse_gpu("37 %") == 37.0 and stats.parse_gpu("garbage") is None and stats.parse_gpu("999") is None
+    assert stats.parse_gpu("37 %") == 37.0
+    assert stats.parse_gpu("gpu utilisation    : 58") == 58.0  # first line of the EX5 Mali file and stats.parse_gpu("garbage") is None and stats.parse_gpu("999") is None
 
 
 def test_history_rates_and_drops():
