@@ -1,17 +1,23 @@
-"""Settings popover under the gear button. Every change saves at once (App.change_setting)."""
+"""Settings popover under the gear button. Every change saves at once (App.change_setting).
+
+Drawn as a card like the rest of the window: a rounded canvas backdrop (RADIUS_CARD) with the content frame
+inset inside it, so the square frame corners never reach the curve."""
 import tkinter as tk
 
 from . import __version__
-from .widgets import Segmented, Switch
+from .widgets import RADIUS_CARD, Segmented, Switch, round_rect
+
+INSET = 12  # content inset inside the rounded backdrop (equal to the radius: corners stay inside the curve)
+TOP = 90    # y of the panel's top edge, under the top bar
 
 
 class SettingsPanel(tk.Frame):
     def __init__(self, app):
         pal, t = app.pal, app.t
-        super().__init__(app.root, bg="#0b0c0e", highlightthickness=1, highlightbackground="#23262c", padx=20, pady=16)
+        super().__init__(app.root, bg=pal["panel2"], padx=20, pady=16)
         self.app = app
-        self.place(relx=1.0, x=-16, y=90, anchor="ne")
-        self.lift()
+        self.backdrop = tk.Canvas(app.root, bg=pal["bg"], highlightthickness=0)
+        self.place(relx=1.0, x=-16 - INSET, y=TOP + INSET, anchor="ne")
         head = tk.Frame(self, bg=self["bg"])
         head.pack(fill="x")
         tk.Label(head, text=t("settings"), bg=self["bg"], fg=pal["text"], font=app.f_title).pack(side="left")
@@ -27,11 +33,11 @@ class SettingsPanel(tk.Frame):
         tk.Frame(cols, bg=self["bg"], width=28).pack(side="left")
         right.pack(side="left", fill="y", anchor="n")
 
-        s = app.s
         self.group(left, t("g_general"))
         self.pick(left, t("s_language"), "language", [("th", "ไทย"), ("en", "English")])
         self.pick(left, t("s_theme"), "theme", [("oled", t("theme_oled")), ("dark", t("theme_dark"))])
-        self.pick(left, t("s_size"), "size", [("auto", t("size_auto")), ("small", t("size_small")), ("medium", t("size_medium")), ("large", t("size_large"))])
+        self.pick(left, t("s_size"), "size", [("auto", t("size_auto")), ("small", t("size_small")),
+                                              ("medium", t("size_medium")), ("large", t("size_large"))])
         self.switch(left, t("s_topmost"), "topmost", t("s_topmost_sub"))
         self.group(left, t("g_connection"))
         self.port(left, t("s_port"))
@@ -57,28 +63,42 @@ class SettingsPanel(tk.Frame):
         for text, command in ((t("open_log"), app.open_log), (t("tool_paths"), app.show_paths)):
             self.link(foot, text, command).pack(side="left", padx=(14, 0))
         self.link(foot, t("reset"), app.reset_settings).pack(side="right")
-        del s
+
+        # backdrop: sized to the content, one inset all round, drawn under the frame
+        self.update_idletasks()
+        w, h = self.winfo_reqwidth() + 2 * INSET, self.winfo_reqheight() + 2 * INSET
+        self.backdrop.configure(width=w, height=h)
+        round_rect(self.backdrop, 0.5, 0.5, w - 0.5, h - 0.5, RADIUS_CARD, fill=pal["panel2"], outline=pal["line"],
+                   width=1)
+        self.backdrop.place(relx=1.0, x=-16, y=TOP, anchor="ne")
+        self.lift()
+
+    def destroy(self):
+        self.backdrop.destroy()
+        super().destroy()
 
     def group(self, parent, title):
-        tk.Label(parent, text=title, bg=self["bg"], fg=self.app.pal["accent"], font=self.app.f_bold).pack(anchor="w", pady=(10, 2))
+        """Muted caption, not accent: accent is reserved for things you can press or that are on."""
+        tk.Label(parent, text=title, bg=self["bg"], fg=self.app.pal["muted"], font=self.app.f_caption).pack(
+            anchor="w", pady=(12, 2))
 
     def row(self, parent, label, sub=None):
         pal = self.app.pal
-        row = tk.Frame(parent, bg=self["bg"], width=330, height=46 if sub else 34)
+        row = tk.Frame(parent, bg=self["bg"], width=384, height=46 if sub else 34)
         row.pack(fill="x")
         row.pack_propagate(False)
         text = tk.Frame(row, bg=self["bg"])
         text.pack(side="left", fill="y")
         tk.Label(text, text=label, bg=self["bg"], fg=pal["text"], font=self.app.f_body).pack(anchor="w", expand=not sub)
         if sub:
-            tk.Label(text, text=sub, bg=self["bg"], fg=pal["muted"], font=self.app.f_tiny).pack(anchor="w")
-        tk.Frame(parent, bg="#16181c", height=1).pack(fill="x")
+            tk.Label(text, text=sub, bg=self["bg"], fg=pal["muted"], font=self.app.f_small).pack(anchor="w")
+        tk.Frame(parent, bg=pal["line"], height=1).pack(fill="x")
         return row
 
     def pick(self, parent, label, key, options, sub=None):
         row = self.row(parent, label, sub)
         Segmented(row, options, self.app.s[key], self.app.pal, lambda v: self.app.change_setting(key, v),
-                  self.app.f_tiny).pack(side="right")
+                  self.app.f_small, bg=self["bg"]).pack(side="right", fill="y", pady=5)
 
     def switch(self, parent, label, key, sub=None):
         row = self.row(parent, label, sub)
@@ -89,7 +109,7 @@ class SettingsPanel(tk.Frame):
         pal = self.app.pal
         row = self.row(parent, label)
         var = tk.StringVar(value=str(self.app.s["port"]))
-        entry = tk.Entry(row, textvariable=var, width=7, bg=pal["panel2"], fg=pal["text"], relief="flat",
+        entry = tk.Entry(row, textvariable=var, width=7, bg=pal["bg"], fg=pal["text"], relief="flat",
                          insertbackground=pal["accent"], font=self.app.f_num, justify="center",
                          highlightthickness=1, highlightbackground=pal["line"], highlightcolor=pal["accent"])
         entry.pack(side="right", ipady=3)
