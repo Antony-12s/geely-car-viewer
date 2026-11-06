@@ -18,4 +18,4 @@ coll = COLLECT(exe, a.binaries, a.datas, name="EX5Viewer")
 if is_mac:
     app = BUNDLE(coll, name="EX5Viewer.app", icon="packaging/icon.icns",
                  bundle_identifier="com.antony12s.ex5viewer",
-                 info_plist={"NSHighResolutionCapable": True, "CFBundleShortVersionString": "1.0.0"})
+                 info_plist={"NSHighResolutionCapable": True, "CFBundleShortVersionString": "1.0.1"})
