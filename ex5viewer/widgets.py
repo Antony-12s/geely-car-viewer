@@ -1,5 +1,6 @@
 """Small Tk widgets and drawing helpers: one token set for cards, chips, bezels and the type scale."""
 import math
+import time
 import tkinter as tk
 import tkinter.font as tkfont
 
@@ -9,6 +10,57 @@ GAP = 12            # gap between blocks, both directions
 RADIUS_CARD = 12    # top-bar and car-panel cards
 RADIUS_BEZEL = 18   # screen bezels
 RADIUS_CHIP = 8     # buttons, chips, fields, segmented controls
+
+# ---- motion ----
+ANIMATE = True      # App sets this from the "animations" setting
+FRAME_MS = 16       # ~60 fps
+SWITCH_MS, SEGMENT_MS, METER_MS, NUMBER_MS, PANEL_MS = 160, 180, 350, 400, 170
+
+
+def ease_out(t):
+    return 1 - (1 - t) ** 3
+
+
+def lerp(a, b, t):
+    return a + (b - a) * t
+
+
+def blend(colour_a, colour_b, t):
+    """Mix two #rrggbb colours (t=0 -> a, t=1 -> b)."""
+    a = [int(colour_a[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(colour_b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(lerp(x, y, t)):02x}" for x, y in zip(a, b))
+
+
+def animate(widget, key, duration_ms, step, done=None):
+    """Call step(eased progress 0..1) every frame for duration_ms. A new animation with the same key on the same
+    widget replaces the running one, so fast updates retarget instead of queueing. Instant when ANIMATE is off."""
+    jobs = widget.__dict__.setdefault("_animations", {})
+    if key in jobs:
+        widget.after_cancel(jobs.pop(key))
+    if not ANIMATE or duration_ms <= 0:
+        step(1.0)
+        if done:
+            done()
+        return
+    start = time.monotonic()
+
+    def tick():
+        progress = min(1.0, (time.monotonic() - start) * 1000 / duration_ms)
+        try:
+            step(ease_out(progress))
+            if progress < 1:
+                jobs[key] = widget.after(FRAME_MS, tick)
+                return
+        except tk.TclError:  # widget destroyed by a rebuild mid-animation
+            jobs.pop(key, None)
+            return
+        jobs.pop(key, None)
+        if done:
+            done()
+
+    tick()
+
 
 THEMES = {
     "oled": dict(bg="#000000", panel="#070708", panel2="#0c0d0f", line="#1c1e23", bezel="#000000",
@@ -175,9 +227,19 @@ class Switch(tk.Canvas):
     def __init__(self, parent, variable, pal, command=None, bg=None):
         super().__init__(parent, width=36, height=21, bg=bg or pal["panel"], highlightthickness=0, cursor="hand2")
         self.variable, self.pal, self.command = variable, pal, command
+        self.pos = 1.0 if variable.get() else 0.0  # 0 = off, 1 = on; animated in between
         self.bind("<Button-1>", self._click)
-        variable.trace_add("write", lambda *_: self.draw())
+        variable.trace_add("write", lambda *_: self._slide())
         self.draw()
+
+    def _slide(self):
+        start, target = self.pos, 1.0 if self.variable.get() else 0.0
+
+        def step(e):
+            self.pos = lerp(start, target, e)
+            self.draw()
+
+        animate(self, "knob", SWITCH_MS, step)
 
     def _click(self, _event):
         self.variable.set(not self.variable.get())
@@ -186,10 +248,10 @@ class Switch(tk.Canvas):
 
     def draw(self):
         self.delete("all")
-        on = self.variable.get()
-        round_rect(self, 0, 0, 36, 21, 10, fill=self.pal["accent"] if on else self.pal["sw_off"], outline="")
-        x = 18 if on else 3
-        self.create_oval(x, 3, x + 15, 18, fill="#ffffff" if on else self.pal["knob_off"], outline="")
+        p = self.pos
+        round_rect(self, 0, 0, 36, 21, 10, fill=blend(self.pal["sw_off"], self.pal["accent"], p), outline="")
+        x = 3 + 15 * p
+        self.create_oval(x, 3, x + 15, 18, fill=blend(self.pal["knob_off"], "#ffffff", p), outline="")
 
 
 class Segmented(tk.Canvas):
@@ -204,6 +266,7 @@ class Segmented(tk.Canvas):
             self.spans.append((option, label, x, x + width))
             x += width
         self.total = int(x + 2)
+        self.pill = self._span(value)
         super().__init__(parent, width=self.total, height=height, bg=bg or pal["panel2"], highlightthickness=0,
                          cursor="hand2")
         self.bind("<Button-1>", self._click)
@@ -216,18 +279,31 @@ class Segmented(tk.Canvas):
                 self.command(option)
                 return
 
+    def _span(self, value):
+        return next(((x1, x2) for option, _l, x1, x2 in self.spans if option == value), None)
+
     def select(self, value):
         self.value = value
-        self.draw()
+        start, target = self.pill, self._span(value)
+        if not start or not target:
+            self.pill = target
+            self.draw()
+            return
+
+        def step(e):
+            self.pill = (lerp(start[0], target[0], e), lerp(start[1], target[1], e))
+            self.draw()
+
+        animate(self, "pill", SEGMENT_MS, step)
 
     def draw(self):
         pal = self.pal
         self.delete("all")
         round_rect(self, 0, 0, self.total, self.h, RADIUS_CHIP, fill=self.track, outline="")
+        if self.pill:
+            round_rect(self, self.pill[0], 2, self.pill[1], self.h - 2, RADIUS_CHIP - 2, fill=pal["seg_on"], outline="")
         for option, label, x1, x2 in self.spans:
             on = option == self.value
-            if on:
-                round_rect(self, x1, 2, x2, self.h - 2, RADIUS_CHIP - 2, fill=pal["seg_on"], outline="")
             self.create_text((x1 + x2) / 2, self.h / 2, text=label, font=self.font,
                              fill=pal["text"] if on else pal["muted"])
 
@@ -247,20 +323,52 @@ class MiniMeter(tk.Frame):
         self.value.pack(side="right")
         self.bar = tk.Canvas(self, width=width, height=3, bg=pal["track"], highlightthickness=0)
         self.bar.pack(pady=(3, 0), anchor="w")
+        self.shown = 0.0
 
     def set(self, text, fraction):
         self.value.configure(text=text)
-        self.bar.delete("all")
-        if fraction is not None:
-            fraction = max(0.0, min(1.0, fraction))
-            colour = self.pal["warn"] if fraction > 0.7 else self.pal["meter"]
-            self.bar.create_rectangle(0, 0, int(self.width * fraction), 3, fill=colour, outline="")
+        if fraction is None:
+            self.shown = 0.0
+            self.bar.delete("all")
+            return
+        start, target = self.shown, max(0.0, min(1.0, fraction))
+        colour = self.pal["warn"] if target > 0.7 else self.pal["meter"]
+
+        def step(e):
+            self.shown = lerp(start, target, e)
+            self.bar.delete("all")
+            self.bar.create_rectangle(0, 0, int(self.width * self.shown), 3, fill=colour, outline="")
+
+        animate(self.bar, "bar", METER_MS, step)
 
 
 class Dot(tk.Canvas):
+    """Status dot. Pulses (fades towards the background and back, 1.2 s) while it shows the warn colour,
+    i.e. connecting / reconnecting, so a waiting state looks alive."""
+
+    PULSE_MS = 1200
+
     def __init__(self, parent, pal, bg, size=8):
         super().__init__(parent, width=size, height=size, bg=bg, highlightthickness=0)
-        self.item = self.create_oval(0, 0, size, size, fill=pal["off_dot"], outline="")
+        self.pal, self.bg, self.colour, self._pulse = pal, bg, pal["off_dot"], None
+        self.item = self.create_oval(0, 0, size, size, fill=self.colour, outline="")
 
     def set(self, colour):
+        self.colour = colour
         self.itemconfigure(self.item, fill=colour)
+        if colour == self.pal["warn"] and ANIMATE:
+            if not self._pulse:
+                self._pulse_start = time.monotonic()
+                self._tick()
+        elif self._pulse:
+            self.after_cancel(self._pulse)
+            self._pulse = None
+
+    def _tick(self):
+        phase = (time.monotonic() - self._pulse_start) * 1000 / self.PULSE_MS
+        fade = 0.55 * (0.5 - 0.5 * math.cos(2 * math.pi * phase))
+        try:
+            self.itemconfigure(self.item, fill=blend(self.colour, self.bg, fade))
+            self._pulse = self.after(40, self._tick)
+        except tk.TclError:
+            self._pulse = None

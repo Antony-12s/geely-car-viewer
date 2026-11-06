@@ -382,3 +382,15 @@ def test_scale_setting_bounds(tmp_path):
         assert s["scale"] == 0.0
     s.set("scale", 1.6)
     assert Settings(tmp_path / "s.json")["scale"] == 1.6
+
+
+def test_motion_helpers():
+    from ex5viewer import carpanel, widgets
+    assert widgets.ease_out(0) == 0 and widgets.ease_out(1) == 1 and widgets.ease_out(0.5) > 0.5
+    assert widgets.blend("#000000", "#ffffff", 0.5) == "#808080"
+    start = {"soc": 20.0, "speed_kmh": None, "gear": "P", "tires": {"fl": 30.0, "fr": None}}
+    end = {"soc": 40.0, "speed_kmh": 50.0, "gear": "D", "tires": {"fl": 34.0, "fr": 35.0}}
+    mid = carpanel.interpolate(start, end, 0.5)
+    assert mid["soc"] == 30.0 and mid["speed_kmh"] == 50.0 and mid["gear"] == "D"
+    assert mid["tires"] == {"fl": 32.0, "fr": 35.0}
+    assert carpanel.interpolate(start, end, 1.0)["soc"] == 40.0

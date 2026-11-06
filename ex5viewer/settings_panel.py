@@ -5,7 +5,7 @@ inset inside it, so the square frame corners never reach the curve."""
 import tkinter as tk
 
 from . import __version__
-from .widgets import RADIUS_CARD, Segmented, Switch, round_rect
+from .widgets import PANEL_MS, RADIUS_CARD, Segmented, Switch, animate, round_rect
 
 INSET = 12  # content inset inside the rounded backdrop (equal to the radius: corners stay inside the curve)
 TOP = 90    # y of the panel's top edge, under the top bar
@@ -39,6 +39,7 @@ class SettingsPanel(tk.Frame):
         self.pick(left, t("s_size"), "size", [("auto", t("size_auto")), ("small", t("size_small")),
                                               ("medium", t("size_medium")), ("large", t("size_large"))])
         self.switch(left, t("s_topmost"), "topmost", t("s_topmost_sub"))
+        self.switch(left, t("s_animations"), "animations", t("s_animations_sub"))
         self.group(left, t("g_connection"))
         self.port(left, t("s_port"))
         self.switch(left, t("s_auto_connect"), "auto_connect", t("s_auto_connect_sub"))
@@ -72,6 +73,16 @@ class SettingsPanel(tk.Frame):
                    width=1)
         self.backdrop.place(relx=1.0, x=-16, y=TOP, anchor="ne")
         self.lift()
+        self._drop_in()
+
+    def _drop_in(self, rise=14):
+        """Slide down into place (Tk frames have no opacity, so motion stands in for the fade)."""
+        def step(e):
+            offset = round(rise * (1 - e))
+            self.backdrop.place_configure(y=TOP - offset)
+            self.place_configure(y=TOP + INSET - offset)
+
+        animate(self, "drop", PANEL_MS, step)
 
     def destroy(self):
         self.backdrop.destroy()

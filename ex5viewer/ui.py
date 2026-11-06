@@ -12,7 +12,7 @@ from tkinter import messagebox
 
 from PIL import Image, ImageTk
 
-from . import __version__, adb, paths
+from . import __version__, adb, paths, widgets
 from .cluster import ClusterStream
 from .i18n import Translator
 from .settings import MAX_SCALE, MIN_SCALE
@@ -208,6 +208,7 @@ class App:
         self.settings_panel = None
         self.t = Translator(self.s["language"])
         self.pal = pal = palette(self.s["theme"])
+        widgets.ANIMATE = bool(self.s["animations"])
         thai = pick_font(["Noto Sans Thai", "Leelawadee UI", "Sukhumvit Set", "Thonburi", "Tahoma"], "TkDefaultFont")
         mono = pick_font(["Noto Sans Mono", "DejaVu Sans Mono", "Consolas", "Menlo", "Courier New"], "TkFixedFont")
         self.f_body, self.f_bold = (thai, 10), (thai, 10, "bold")   # secondary text, buttons
@@ -758,7 +759,7 @@ class App:
             return
         if old == value:
             return
-        if key in ("language", "theme", "size", "show_host", "show_car", "show_vehicle", "rotate_hud", "graph_seconds", "cluster_interval"):
+        if key in ("language", "theme", "animations", "show_host", "show_car", "show_vehicle", "rotate_hud", "graph_seconds", "cluster_interval"):
             if key == "graph_seconds":
                 self.history.resize(value)
             self.build()

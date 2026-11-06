@@ -4,7 +4,8 @@ import tkinter as tk
 import webbrowser
 
 from .vehicle import compass
-from .widgets import GAP, RADIUS_CARD, RADIUS_CHIP, baseline_text, draw_icon, round_rect
+from .widgets import (GAP, NUMBER_MS, PANEL_MS, RADIUS_CARD, RADIUS_CHIP, animate, baseline_text, draw_icon, lerp,
+                      round_rect)
 
 HEIGHT = 100
 TIRE_LOW, TIRE_HIGH, TIRE_SPREAD = 30.0, 42.0, 3.0  # psi: warn outside the band or when one tire is off
@@ -30,12 +31,29 @@ def split(total, weights):
     return widths
 
 
+ANIMATED = ("soc", "range_km", "speed_kmh", "temp_c", "charge_kw", "odometer")
+
+
+def interpolate(start, end, t):
+    """Car values between two samples; anything not numeric on both sides jumps to the new value."""
+    out = dict(end)
+    for key in ANIMATED:
+        a, b = start.get(key), end.get(key)
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            out[key] = lerp(a, b, t)
+    if start.get("tires") and end.get("tires"):
+        out["tires"] = {wheel: lerp(start["tires"][wheel], value, t)
+                        if isinstance(start["tires"].get(wheel), (int, float)) and isinstance(value, (int, float))
+                        else value for wheel, value in end["tires"].items()}
+    return out
+
+
 class CarPanel(tk.Canvas):
     def __init__(self, app, parent, left, right):
         """left / right: widths of the main and HUD columns below; the cards fill both with one GAP between."""
         super().__init__(parent, width=left + GAP + right, height=HEIGHT, bg=app.pal["bg"], highlightthickness=0)
         self.app, self.left, self.right = app, left, right
-        self.data = {}
+        self.data, self.shown = {}, None  # shown: interpolated car values while numbers animate
         self.tag_bind("map", "<Button-1>", lambda _e: self.open_map())
         self.tag_bind("info", "<Button-1>", lambda _e: TboxInfo(self.app, self.data.get("tcam_info")))
         for tag in ("map", "info"):
@@ -44,8 +62,24 @@ class CarPanel(tk.Canvas):
         self.draw()
 
     def update_data(self, **data):
+        """New values glide from what is on screen to the new numbers (battery fill, speed, range, tires...)."""
+        before = self.shown or self.data.get("car")
         self.data.update(data)
-        self.draw()
+        after = self.data.get("car")
+        if not (before and after) or before is after or "car" not in data:
+            if not self.shown:
+                self.draw()
+            return
+
+        def step(e):
+            self.shown = interpolate(before, after, e)
+            self.draw()
+
+        def done():
+            self.shown = None
+            self.draw()
+
+        animate(self, "numbers", NUMBER_MS, step, done)
 
     def open_map(self):
         gps = self.data.get("gps")
@@ -65,7 +99,7 @@ class CarPanel(tk.Canvas):
         app = self.app
         small = app.size_name == "small"
         connected = app.conn == "connected"
-        car = self.data.get("car") or {}
+        car = self.shown or self.data.get("car") or {}
         cards = [self._card_battery, self._card_drive, self._card_tires] + ([] if small else [self._card_temp])
         weights = [1.0, 1.0, 1.1] + ([] if small else [0.9])
         widths = split(self.left - GAP * (len(cards) - 1), weights)
@@ -242,6 +276,7 @@ class TboxInfo(tk.Toplevel):
         self.status = tk.Label(foot, bg=pal["panel"], fg=pal["live"], font=app.f_small)
         self.status.pack(side="left", padx=12)
         self.reveal(False)
+        fade_in(self)
 
     def reveal(self, on):
         self.revealed = on
@@ -256,3 +291,12 @@ class TboxInfo(tk.Toplevel):
             self.clipboard_clear()
             self.clipboard_append(value)
             self.status.configure(text=self.app.t("c_copied", name=dict(self.ROWS).get(key) or key))
+
+
+def fade_in(window):
+    """Fade a Toplevel in. Needs a compositing window manager; elsewhere -alpha is ignored and it just appears."""
+    try:
+        window.attributes("-alpha", 0.0)
+    except tk.TclError:
+        return
+    animate(window, "fade", PANEL_MS, lambda e: window.attributes("-alpha", e))

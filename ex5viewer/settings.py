@@ -12,6 +12,7 @@ DEFAULTS = {
     "size": "auto",            # auto (medium, small when the screen is too small) / small / medium / large
     "scale": 0.0,              # screen scale picked by dragging the window corner; 0 = use "size"
     "topmost": False,
+    "animations": True,        # switches, meters, numbers and panels move instead of jumping
     "port": 5566,              # this car's adb port; plain IPs get it appended
     "auto_connect": True,
     "auto_reconnect": True,
