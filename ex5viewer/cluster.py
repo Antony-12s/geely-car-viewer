@@ -74,6 +74,10 @@ class PipeSocket:
     def sendall(self, data):
         self.send(data)
 
+    @property
+    def _closed(self):  # paramiko's Transport.close() reads the private flag of real sockets
+        return self.closed
+
     def settimeout(self, timeout):
         self.timeout = timeout
 
@@ -127,6 +131,46 @@ def read_bmp(stream):
     return head + body if len(body) == size - 6 else None
 
 
+class JpegReader:
+    """Split ffmpeg's MJPEG byte stream into JPEG files (ends at FFD9; ffmpeg adds no thumbnails)."""
+
+    def __init__(self, stream):
+        self.stream, self.buffer = stream, b""
+
+    def read(self):
+        while True:
+            end = self.buffer.find(b"\xff\xd9")
+            if end >= 0:
+                frame, self.buffer = self.buffer[:end + 2], self.buffer[end + 2:]
+                return frame if frame[:2] == b"\xff\xd8" else None
+            chunk = self.stream.read1(65536) if hasattr(self.stream, "read1") else self.stream.read(65536)
+            if not chunk or len(self.buffer) > 8 * 1024 * 1024:
+                return None
+            self.buffer += chunk
+
+
+FFMPEG_INPUT = "-f image2pipe -c:v bmp"
+JPEG_WIDTH = 960  # 2x the cluster view of the medium window. 22 KB/frame instead of a 4 MB BMP
+
+
+def capture_script(surface, interval, jpeg):
+    """Shell loop run on the cluster. Everything is niced: the driver's gauges come first.
+
+    Raw mode: `cat` into the closed channel fails and ends the loop. JPEG mode: ffmpeg sits in
+    between, so a watcher waits for stdin EOF (channel closed) and kills ffmpeg; the loop then
+    dies on its next write. Without it the loop kept running on the cluster after we left.
+    """
+    dump = f"nice -n 19 LayerManagerControl dump surface {surface} to $f >/dev/null 2>&1"
+    # the sleep runs alongside the dump: one frame every `interval` s, or as fast as the dump goes
+    loop = f"while :; do sleep {interval} & {dump} && cat $f || {{ rm -f $f; exit; }}; wait; done"
+    setup = f"{ENV} f=/tmp/ex5c-$$.bmp;"  # own file per session: two viewers must not delete each other's
+    if not jpeg:
+        return f"{setup} {loop}"
+    ffmpeg = (f"nice -n 19 ffmpeg -v error -threads 1 {FFMPEG_INPUT} -i - -vf scale={JPEG_WIDTH}:-2"
+              " -q:v 4 -flush_packets 1 -f image2pipe -c:v mjpeg -")
+    return f"{setup} ( {loop} ) | {ffmpeg} & cat >/dev/null; kill $! 2>/dev/null; sleep {interval}; rm -f $f"
+
+
 def surface_ids(listing):
     return [line.split()[2] for line in listing.splitlines() if line.startswith("- Surface ")]
 
@@ -176,15 +220,15 @@ class ClusterStream(threading.Thread):
         ids = surface_ids(run(transport, ENV + " LayerManagerControl get surfaces"))
         if not ids:
             raise RuntimeError("no IVI surface on the cluster")
-        loop = (f"{ENV} trap 'rm -f /tmp/ex5c.bmp' EXIT; while :; do LayerManagerControl dump surface {ids[0]}"
-                f" to /tmp/ex5c.bmp >/dev/null 2>&1 && cat /tmp/ex5c.bmp || exit; sleep {self.interval}; done")
+        jpeg = "/ffmpeg" in run(transport, "command -v ffmpeg")
         channel = transport.open_session(timeout=15)
         channel.settimeout(self.interval + 20)  # a stalled relay surfaces as a timeout, then a reconnect
-        channel.exec_command(loop)
+        channel.exec_command(capture_script(ids[0], self.interval, jpeg))
         stream = channel.makefile("rb")
+        next_frame = JpegReader(stream).read if jpeg else lambda: read_bmp(stream)
         got_frame = False
         while not self.stop_event.is_set():
-            data = read_bmp(stream)
+            data = next_frame()
             if data is None:
                 break
             image = Image.open(io.BytesIO(data)).convert("RGB").resize(self.size_fn(), Image.Resampling.BILINEAR)

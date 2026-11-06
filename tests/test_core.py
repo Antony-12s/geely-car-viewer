@@ -121,6 +121,8 @@ class FakeCluster(paramiko.ServerInterface):
             time.sleep(0.2)  # let the exec reply go out before data/close
             if "get surfaces" in command:
                 channel.sendall(b"- Surface 4711 (0x1267)\n")
+            elif command.startswith("command -v"):
+                pass  # no ffmpeg: the stream falls back to raw BMP frames
             else:
                 for color in ("red", "green", "blue"):
                     channel.sendall(bmp(color, (192, 53)))
@@ -169,10 +171,11 @@ def test_cluster_stream_over_pipe_socket():
     assert done.wait(20), f"frames={len(frames)} states={states}"
     stream.stop()
     stream.join(10)
+    assert not stream.is_alive()
     assert [img.size for img in frames] == [(96, 26)] * 3
     assert frames[0].getpixel((0, 0)) == (255, 0, 0) and frames[2].getpixel((0, 0)) == (0, 0, 255)
     assert states[:2] == ["connecting", "live"]
-    assert "dump surface 4711" in server.commands[1]
+    assert "dump surface 4711" in server.commands[2]
     down, up = meter.take()
     assert down > 3 * 192 * 53 * 3 and up > 0  # raw ssh bytes, both directions
 
@@ -222,3 +225,30 @@ def test_every_string_has_both_languages_and_formats():
         assert th and en, key
         assert th.count("{") == en.count("{"), key
     assert Translator("en")("refresh", s="1") == "Refresh 1s"
+
+
+def test_transport_close_over_pipe_socket():
+    """paramiko's close() reads sock._closed; PipeSocket lacked it and the close blew up mid-way."""
+    _server, relay = fake_cluster_server()
+    sock = cluster.PipeSocket(relay)
+    transport = cluster.open_transport(sock)
+    transport.close()
+    sock.close()
+    assert sock._closed
+
+
+def test_jpeg_reader_splits_mjpeg_stream():
+    from PIL import Image
+    jpegs = []
+    for color in ("red", "blue"):
+        buffer = io.BytesIO()
+        Image.new("RGB", (16, 8), color).save(buffer, "JPEG")
+        jpegs.append(buffer.getvalue())
+    reader = cluster.JpegReader(io.BytesIO(b"".join(jpegs)))
+    assert reader.read() == jpegs[0] and reader.read() == jpegs[1] and reader.read() is None
+
+
+def test_capture_script_sleeps_alongside_the_dump():
+    script = cluster.capture_script("4711", 0.5, jpeg=True)
+    assert "sleep 0.5 & nice -n 19 LayerManagerControl dump surface 4711" in script
+    assert "; wait; done" in script and "ffmpeg" in script and "kill $!" in script
