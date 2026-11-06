@@ -163,12 +163,15 @@ def capture_script(surface, interval, jpeg):
     dump = f"nice -n 19 LayerManagerControl dump surface {surface} to $f >/dev/null 2>&1"
     # the sleep runs alongside the dump: one frame every `interval` s, or as fast as the dump goes
     loop = f"while :; do sleep {interval} & {dump} && cat $f || {{ rm -f $f; exit; }}; wait; done"
-    setup = f"{ENV} f=/tmp/ex5c-$$.bmp;"  # own file per session: two viewers must not delete each other's
+    # own file per session (two viewers must not delete each other's); first drop files whose
+    # session is gone: an in-flight dump can rewrite the file after the old session's rm (4 MB each)
+    stale = 'for g in /tmp/ex5c*.bmp; do p=${g#/tmp/ex5c-}; [ -d "/proc/${p%.bmp}" ] || rm -f "$g"; done;'
+    setup = f"{ENV} {stale} f=/tmp/ex5c-$$.bmp;"
     if not jpeg:
         return f"{setup} {loop}"
     ffmpeg = (f"nice -n 19 ffmpeg -v error -threads 1 {FFMPEG_INPUT} -i - -vf scale={JPEG_WIDTH}:-2"
               " -q:v 4 -flush_packets 1 -f image2pipe -c:v mjpeg -")
-    return f"{setup} ( {loop} ) | {ffmpeg} & cat >/dev/null; kill $! 2>/dev/null; sleep {interval}; rm -f $f"
+    return f"{setup} ( {loop} ) | {ffmpeg} & cat >/dev/null; kill $! 2>/dev/null; sleep 2; rm -f $f"
 
 
 def surface_ids(listing):
@@ -184,12 +187,14 @@ class ClusterStream(threading.Thread):
         self.serial, self.interval, self.size_fn = serial, interval, size_fn
         self.on_frame, self.on_state, self.meter, self.reconnect = on_frame, on_state, meter, reconnect
         self.proxy_args = proxy_args or [adb.ADB, "-s", serial, "shell", "-T", "su", "0", "toybox", "nc", "-w", "3",
-                                         CLUSTER_IP, "22"]
+                                         "-q", "1", CLUSTER_IP, "22"]  # -q: killing adb leaves nc running otherwise
         self.stop_event = threading.Event()
-        self._sock = None
+        self._sock = self._transport = None
 
     def stop(self):
         self.stop_event.set()
+        if self._transport:  # say goodbye first: dropbear then ends the session and its shell loop
+            self._transport.close()
         if self._sock:
             self._sock.close()
 
@@ -216,7 +221,7 @@ class ClusterStream(threading.Thread):
 
     def _session(self):
         self._sock = PipeSocket(self.proxy_args, self.meter)
-        transport = open_transport(self._sock)
+        transport = self._transport = open_transport(self._sock)
         ids = surface_ids(run(transport, ENV + " LayerManagerControl get surfaces"))
         if not ids:
             raise RuntimeError("no IVI surface on the cluster")

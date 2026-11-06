@@ -252,3 +252,15 @@ def test_capture_script_sleeps_alongside_the_dump():
     script = cluster.capture_script("4711", 0.5, jpeg=True)
     assert "sleep 0.5 & nice -n 19 LayerManagerControl dump surface 4711" in script
     assert "; wait; done" in script and "ffmpeg" in script and "kill $!" in script
+
+
+def test_capture_script_removes_only_dead_sessions_files(tmp_path):
+    """Run the cleanup part in a real sh: keeps the file of a live pid, drops dead ones and the old name."""
+    import os, subprocess
+    script = cluster.capture_script("1", 1, jpeg=True)
+    stale = script[script.index("for g in"):script.index("done;") + 5].replace("/tmp/", f"{tmp_path}/")
+    live, dead, old = (tmp_path / f"ex5c-{os.getpid()}.bmp", tmp_path / "ex5c-999999999.bmp", tmp_path / "ex5c.bmp")
+    for path in (live, dead, old):
+        path.write_bytes(b"BM")
+    subprocess.run(["sh", "-c", stale], check=True)
+    assert live.exists() and not dead.exists() and not old.exists()
