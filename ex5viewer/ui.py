@@ -804,8 +804,11 @@ class App:
                 continue
             for metric in ("cpu", "gpu"):
                 value = values[metric]
-                cells[metric.upper()].set(f"{value:.0f}%" if value is not None else "–",
-                                          value / 100 if value is not None else None)
+                text = f"{value:.0f}%" if value is not None else "–"
+                if metric == "gpu" and values.get("gpu_mhz") and self.size_name != "small":
+                    # % is busy time at the current clock; the clock says how hard the GPU is pushed
+                    text += f" {values['gpu_mhz']}M"
+                cells[metric.upper()].set(text, value / 100 if value is not None else None)
             used, total = values["ram"]
             cells["RAM"].set(human_gb(used, total), used / total if total else None)
 

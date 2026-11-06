@@ -276,3 +276,17 @@ def test_parse_tcam_from_head_unit_log():
     offline = line.replace("FourGnetwork", "NoNetwork").replace("Operator_Chinamobile", "Operator_Unknown")
     assert stats.parse_tcam(offline) == {"network": None, "level": 4, "operator": None}
     assert stats.parse_tcam("") is None and stats.parse_tcam("garbage") is None
+
+
+def test_car_stats_parses_gpu_clock_and_tcam(monkeypatch):
+    out = ("cpu  100 0 100 800 0 0 0 0 0 0\n---\nMemTotal: 8000 kB\nMemFree: 1000 kB\nMemAvailable: 2000 kB\n---\n"
+           "gpu utilisation    : 58\ncompute utilisation: 7\n\n---\n106250000\n---\n"
+           "W ECARX TCAM: x{.eSIMConnectionStatus__ = ESIMConnectionStatus_FourGnetwork, .signallevl__ = 3, "
+           ".operator__ = Operator_Chinamobile}\n")
+    monkeypatch.setattr(stats.adb, "run", lambda *a, **k: type("R", (), {"stdout": out})())
+    sample = stats.CarStats("x").sample()
+    assert sample["gpu"] == 58.0 and sample["gpu_mhz"] == 106
+    assert sample["tcam"] == {"network": "4G", "level": 3, "operator": "China Mobile"}
+    no_clock = out.replace("106250000", "")
+    monkeypatch.setattr(stats.adb, "run", lambda *a, **k: type("R", (), {"stdout": no_clock})())
+    assert stats.CarStats("x").sample()["gpu_mhz"] is None

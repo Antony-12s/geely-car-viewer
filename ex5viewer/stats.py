@@ -133,7 +133,9 @@ class CarStats:
         self._count = 0
         self.tcam = None
         gpu = " ".join(f"cat {path} 2>/dev/null | head -1;" for path in CAR_GPU_FILES)
-        self.script = f"head -1 /proc/stat; echo ---; head -3 /proc/meminfo; echo ---; {gpu} echo"
+        # GPU clock in Hz from devfreq (EX5: /sys/class/devfreq/e5000000.gpu), readable without root
+        self.script = (f"head -1 /proc/stat; echo ---; head -3 /proc/meminfo; echo ---; {gpu} echo; echo ---;"
+                       " cat /sys/class/devfreq/*.gpu/cur_freq 2>/dev/null | head -1")
 
     def sample(self):
         script = self.script
@@ -144,14 +146,16 @@ class CarStats:
         parts = out.split("---")
         if len(parts) < 3 or not parts[0].strip().startswith("cpu"):
             return None
-        if len(parts) > 3:  # keep the last known value when the line rotated out of the log
-            self.tcam = parse_tcam(parts[3]) or self.tcam
+        if len(parts) > 4:  # keep the last known value when the line rotated out of the log
+            self.tcam = parse_tcam(parts[4]) or self.tcam
+        hz = parts[3].split()[0] if len(parts) > 3 and parts[3].split() else ""
         times = cpu_times(parts[0].strip())
         cpu = cpu_percent(self._cpu, times) if self._cpu else None
         self._cpu = times
         used, total = mem_used(parts[1])
         gpu = next((v for v in map(parse_gpu, parts[2].strip().splitlines()) if v is not None), None)
-        return {"cpu": cpu, "gpu": gpu, "ram": (used, total), "tcam": self.tcam}
+        return {"cpu": cpu, "gpu": gpu, "gpu_mhz": int(hz) // 1_000_000 if hz.isdigit() else None,
+                "ram": (used, total), "tcam": self.tcam}
 
 
 class HostStats:
@@ -162,9 +166,24 @@ class HostStats:
         self._rc6 = next(iter(glob.glob("/sys/class/drm/card*/gt/gt0/rc6_residency_ms")
                               + glob.glob("/sys/class/drm/card*/power/rc6_residency_ms")), None)
         self._rc6_last = None
+        # Intel actual GPU clock next to the RC6 file (newer kernels) or on the card (older ones)
+        self._freq = None
+        if self._rc6:
+            card = self._rc6.split("/gt/")[0].split("/power/")[0]
+            self._freq = next((p for p in (os.path.join(os.path.dirname(self._rc6), "rps_act_freq_mhz"),
+                                           os.path.join(card, "gt_act_freq_mhz")) if os.path.exists(p)), None)
         self._nvidia = shutil.which("nvidia-smi") if not self._rc6 else None
 
+    def _gpu_mhz(self):
+        if self._freq:
+            try:
+                return int(open(self._freq).read())
+            except (OSError, ValueError):
+                return None
+        return self._nvidia_mhz
+
     def _gpu(self):
+        self._nvidia_mhz = None
         if self._rc6:
             # busy = time not spent in RC6 sleep; no root needed (perf counters are locked down)
             try:
@@ -178,16 +197,21 @@ class HostStats:
             return max(0.0, min(100.0, 100 - 100 * (now[1] - last[1]) / wall_ms)) if wall_ms > 0 else None
         if self._nvidia:
             try:
-                out = subprocess.run([self._nvidia, "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
+                out = subprocess.run([self._nvidia, "--query-gpu=utilization.gpu,clocks.gr",
+                                      "--format=csv,noheader,nounits"],
                                      capture_output=True, text=True, timeout=3, **adb.NO_WINDOW).stdout
-                return float(out.split()[0])
+                load, mhz = out.splitlines()[0].split(",")
+                self._nvidia_mhz = int(mhz)
+                return float(load)
             except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
                 return None
         return None
 
     def sample(self):
         memory = psutil.virtual_memory()
-        return {"cpu": psutil.cpu_percent(None), "gpu": self._gpu(), "ram": (memory.total - memory.available, memory.total)}
+        gpu = self._gpu()
+        return {"cpu": psutil.cpu_percent(None), "gpu": gpu, "gpu_mhz": self._gpu_mhz(),
+                "ram": (memory.total - memory.available, memory.total)}
 
 
 def tcp_ping(address, timeout=2.0):
