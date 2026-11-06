@@ -16,6 +16,8 @@ from . import __version__, adb, paths
 from .cluster import ClusterStream
 from .i18n import Translator
 from .scrcpy import TOUCH_DOWN, TOUCH_MOVE, TOUCH_UP, VideoStream
+from .carpanel import CarPanel
+from .vehicle import VehicleStats
 from .stats import CarStats, History, HostStats, Meter, human_gb, tcp_ping
 from .widgets import Dot, MiniMeter, Segmented, Switch, corner_masks, palette, round_rect
 
@@ -112,6 +114,7 @@ class App:
         self.detected_model = None
         self.usb_list, self.ping, self.car_ok = [], None, True
         self.tcam = None
+        self.car_data, self.vehicle_stats, self._tbox_last = {}, None, None
         self.host_stats, self.car_stats = HostStats(), None
         self.press = None
         self.screens = {}
@@ -165,6 +168,15 @@ class App:
         self.root.resizable(False, False)
         self.root.attributes("-topmost", bool(self.s["topmost"]))
         self.build_topbar()
+        self.car_panel = None
+        if self.s["show_vehicle"]:
+            sizes = self.sizes()
+            width = sizes["main"][0] + sizes["hud"][0] + 4 * PAD + 18  # same width as the screens below
+            holder = tk.Frame(self.root, bg=self.pal["bg"], padx=20)
+            holder.pack(pady=(16, 0))
+            self.car_panel = CarPanel(self, holder, width)
+            self.car_panel.pack()
+            self.car_panel.update_data(**self.car_data)
         self.build_screens()
         self.update_conn_ui()
 
@@ -211,8 +223,6 @@ class App:
         info.pack(side="left", fill="y", padx=(10, 0))
         self.ping_label = tk.Label(info, bg=pal["panel"], fg=pal["muted"], font=self.f_tiny, anchor="w")
         self.ping_label.pack(anchor="w")
-        self.tcam_label = tk.Label(info, bg=pal["panel"], fg=pal["muted"], font=self.f_tiny, anchor="w")
-        self.tcam_label.pack(anchor="w")
         self.ip_var = tk.StringVar(value=self.s["address"])
         self.ip_entry = tk.Entry(group, textvariable=self.ip_var, width=19, bg=pal["panel2"], fg=pal["text"],
                                  relief="flat", insertbackground=pal["accent"], font=self.f_num,
@@ -410,7 +420,18 @@ class App:
             self.ping_label.configure(text=f"ping {self.ping:.0f} ms" if self.ping is not None else "ping –")
         else:
             self.ping_label.configure(text="")
-        self.tcam_label.configure(text=self.tcam_text() if self.conn == "connected" else "")
+
+    def update_car_data(self, car):
+        data = {"tcam": car.get("tcam"), "gps": car.get("gps")}
+        now, counters = time.monotonic(), car.get("tbox_bytes")
+        if counters:
+            last, self._tbox_last = self._tbox_last, (now, counters)
+            data["tbox_total"] = sum(counters)
+            if last and now > last[0] and all(c >= p for c, p in zip(counters, last[1])):
+                data["tbox_rate"] = tuple((c - p) / (now - last[0]) for c, p in zip(counters, last[1]))
+        self.car_data.update(data)
+        if self.car_panel:
+            self.car_panel.update_data(**self.car_data)
 
     def tcam_text(self):
         """T-Box line: `T-Box 4G ▮▮▮▯ China Mobile`, or no signal."""
@@ -507,6 +528,9 @@ class App:
         self.model = self.layout_model()
         self.conn, self.car_ok, self.ping = "connected", True, None
         self.car_stats = CarStats(serial)
+        self.vehicle_stats = VehicleStats(serial)
+        self.car_data, self._tbox_last = {}, None
+        threading.Thread(target=self.vehicle_loop, args=(self.generation, self.vehicle_stats), daemon=True).start()
         self.history = History(self.s["graph_seconds"])
         self.build()
         self.start_streams()
@@ -550,6 +574,9 @@ class App:
         self.stop_streams()
         was = self.conn
         self.conn, self.serial, self.address, self.car_stats = "idle", None, None, None
+        self.vehicle_stats = None
+        if self.car_panel:
+            self.car_panel.draw()
         if was != "idle" and not quiet:
             for screen in self.screens.values():
                 screen.has_frame = False
@@ -653,7 +680,7 @@ class App:
         self.s.set(key, value)
         if old == value:
             return
-        if key in ("language", "theme", "size", "show_host", "show_car", "rotate_hud", "graph_seconds", "cluster_interval"):
+        if key in ("language", "theme", "size", "show_host", "show_car", "show_vehicle", "rotate_hud", "graph_seconds", "cluster_interval"):
             if key == "graph_seconds":
                 self.history.resize(value)
             self.build()
@@ -778,6 +805,26 @@ class App:
             self.ui(lambda h=host, c=car, p=ping, u=usb, f=failures: self.show_stats(h, c, p, u, f))
             time.sleep(max(0.5, 2 - (time.monotonic() - started)))
 
+    def vehicle_loop(self, generation, stats):
+        """Car panel values in their own thread: car_service hangs while the car powers down,
+        and that must not freeze the CPU/ping meters. Ends when the connection changes."""
+        while generation == self.generation:
+            delay = 4
+            if self.s["show_vehicle"]:
+                try:
+                    values = stats.sample()
+                except Exception as error:  # timeout while the car sleeps: back off
+                    log.info("vehicle: %s", error)
+                    values, delay = None, 20
+                if values and generation == self.generation:
+                    self.ui(lambda v=values: self.set_vehicle(v))
+            time.sleep(delay)
+
+    def set_vehicle(self, values):
+        self.car_data["car"] = values
+        if self.car_panel:
+            self.car_panel.update_data(**self.car_data)
+
     def show_stats(self, host, car, ping, usb, failures):
         if usb is not None and usb != self.usb_list:
             self.usb_list = usb
@@ -788,6 +835,7 @@ class App:
             self.ping = ping if ping is not None else self.ping
             if car:
                 self.tcam = car.get("tcam")
+                self.update_car_data(car)
             ok = failures < 2
             if ok != self.car_ok:
                 self.car_ok = ok

@@ -48,6 +48,7 @@ class SettingsPanel(tk.Frame):
         self.pick(right, t("s_graph"), "graph_seconds", [(30, "30"), (60, "60"), (120, t("seconds", s=120))])
         self.switch(right, t("s_show_host"), "show_host", "CPU / GPU / RAM")
         self.switch(right, t("s_show_car"), "show_car", t("s_show_car_sub"))
+        self.switch(right, t("s_show_vehicle"), "show_vehicle", t("s_show_vehicle_sub"))
 
         tk.Frame(self, bg=pal["line"], height=1).pack(fill="x", pady=(12, 10))
         foot = tk.Frame(self, bg=self["bg"])

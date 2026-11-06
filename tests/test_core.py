@@ -281,12 +281,68 @@ def test_parse_tcam_from_head_unit_log():
 def test_car_stats_parses_gpu_clock_and_tcam(monkeypatch):
     out = ("cpu  100 0 100 800 0 0 0 0 0 0\n---\nMemTotal: 8000 kB\nMemFree: 1000 kB\nMemAvailable: 2000 kB\n---\n"
            "gpu utilisation    : 58\ncompute utilisation: 7\n\n---\n106250000\n---\n"
-           "W ECARX TCAM: x{.eSIMConnectionStatus__ = ESIMConnectionStatus_FourGnetwork, .signallevl__ = 3, "
-           ".operator__ = Operator_Chinamobile}\n")
+           " eth0.11: 14344625   35242    0    0    0     0          0         3 18033053   43524    0 0 0 0 0 0\n---\n"
+           "W ECARX TCAM: onEsimStatusoNotification{.eSIMConnectionStatus__ = ESIMConnectionStatus_FourGnetwork, .signallevl__ = 3, "
+           ".operator__ = Operator_Chinamobile}\n"
+           "I GOS     : \tposnFromSatlt{ posnLat:13.500000, posnLgt:100.250000, posnAlti:12.000000, posnSpd:0.000000,"
+           " posnDir:95.000000, uTCForYr:26}\n")
     monkeypatch.setattr(stats.adb, "run", lambda *a, **k: type("R", (), {"stdout": out})())
     sample = stats.CarStats("x").sample()
     assert sample["gpu"] == 58.0 and sample["gpu_mhz"] == 106
     assert sample["tcam"] == {"network": "4G", "level": 3, "operator": "China Mobile"}
+    assert sample["tbox_bytes"] == (14344625, 18033053)
+    assert (sample["gps"]["lat"], sample["gps"]["lon"], sample["gps"]["heading"]) == (13.5, 100.25, 95.0)
     no_clock = out.replace("106250000", "")
     monkeypatch.setattr(stats.adb, "run", lambda *a, **k: type("R", (), {"stdout": no_clock})())
     assert stats.CarStats("x").sample()["gpu_mhz"] is None
+
+
+def test_vehicle_values_from_car_service_output():
+    from ex5viewer import vehicle
+    out = """Property:0x2160730e,status: 0,timestamp:1,zone:0x0,floatValues: [19.0],int32Values: [],int64Values: [],bytes: [],string:
+Property:0x216072da,status: 0,timestamp:1,zone:0x0,floatValues: [98.0],int32Values: [],int64Values: [],bytes: [],string:
+Property:0x11600308,status: 2,timestamp:1,zone:0x0,floatValues: [99.0],int32Values: [],int64Values: [],bytes: [],string:
+Property:0x216072cc,status: 0,timestamp:1,zone:0x0,floatValues: [39.0],int32Values: [],int64Values: [],bytes: [],string:
+Property:0x11600207,status: 0,timestamp:1,zone:0x0,floatValues: [10.0],int32Values: [],int64Values: [],bytes: [],string:
+Property:0x11400400,status: 0,timestamp:1,zone:0x0,floatValues: [],int32Values: [4],int64Values: [],bytes: [],string:
+Property:0x11600204,status: 0,timestamp:1,zone:0x0,floatValues: [28149.0],int32Values: [],int64Values: [],bytes: [],string:
+Property:0x1120030a,status: 0,timestamp:0,zone:0x0,floatValues: [],int32Values: [1],int64Values: [],bytes: [],string:
+Property:0x1160030c,status: 0,timestamp:0,zone:0x0,floatValues: [-7200000.0],int32Values: [],int64Values: [],bytes: [],string:
+Property:0x17600309,status: 0,timestamp:1,zone:0x1,floatValues: [35.600002],int32Values: [],int64Values: [],bytes: [],string:
+Property:0x17600309,status: 0,timestamp:1,zone:0x2,floatValues: [35.8],int32Values: [],int64Values: [],bytes: [],string:
+Property:0x17600309,status: 0,timestamp:1,zone:0x4,floatValues: [34.8],int32Values: [],int64Values: [],bytes: [],string:
+Property:0x17600309,status: 0,timestamp:1,zone:0x8,floatValues: [34.2],int32Values: [],int64Values: [],bytes: [],string:
+Property 0x21608057 not supported by HAL"""
+    car = vehicle.build(vehicle.parse_values(out))
+    assert car["soc"] == 19.0 and car["range_km"] == 98.0 and car["temp_c"] == 39.0
+    assert car["speed_kmh"] == 36.0 and car["gear"] == "P" and car["odometer"] == 28149.0
+    assert car["plugged"] is True and car["charge_kw"] == 7.2
+    assert car["tires"] == {"fl": 35.600002, "fr": 35.8, "rl": 34.8, "rr": 34.2}
+    empty = vehicle.build({})
+    assert all(value is None for value in empty.values())
+
+
+def test_position_in_milliarcseconds_and_compass():
+    from ex5viewer import vehicle
+    line = "posnFromSatlt{ posnLat:47146964.0, posnLgt:363425760.0, posnAlti:5.0, posnSpd:0.0, posnDir:370.0"
+    position = vehicle.parse_position(line)
+    assert round(position["lat"], 3) == 13.096 and round(position["lon"], 3) == 100.952 and position["heading"] == 10
+    assert vehicle.parse_position("posnFromSatlt{ posnLat:0.0, posnLgt:0.0, posnAlti:0.0, posnSpd:0.0, posnDir:0.0") is None
+    assert [vehicle.compass(d) for d in (0, 44, 46, 180, 350)] == ["N", "NE", "NE", "S", "N"]
+
+
+def test_vehicle_values_android13_format():
+    from ex5viewer import vehicle
+    out = ("Property:0x17600309, status: 0, timestamp: 4413847669, zone: 0x1, floatValues: [200.0], int32Values: [], "
+           "int64Values: [], bytes: [], string: \n"
+           "Property:0x11400400, status: 0, timestamp: 4413883103, zone: 0x0, floatValues: [], int32Values: [8], "
+           "int64Values: [], bytes: [], string: \n")
+    car = vehicle.build(vehicle.parse_values(out))
+    assert car["gear"] == "D" and car["tires"]["fl"] == 200.0
+
+
+def test_vehicle_fallbacks_aosp_units():
+    from ex5viewer import vehicle
+    values = {("11600308", 0): 50000.0, ("11600309", 0): 24500.0, ("11600106", 0): 49000.0}
+    car = vehicle.build(values)
+    assert car["range_km"] == 50.0 and car["soc"] == 50.0

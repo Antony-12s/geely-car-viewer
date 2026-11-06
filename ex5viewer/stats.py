@@ -10,7 +10,7 @@ from collections import deque
 
 import psutil
 
-from . import adb
+from . import adb, vehicle
 
 
 class Meter:
@@ -131,23 +131,34 @@ class CarStats:
         self.serial = serial
         self._cpu = None
         self._count = 0
-        self.tcam = None
+        self.tcam = self.gps = None
         gpu = " ".join(f"cat {path} 2>/dev/null | head -1;" for path in CAR_GPU_FILES)
         # GPU clock in Hz from devfreq (EX5: /sys/class/devfreq/e5000000.gpu), readable without root
         self.script = (f"head -1 /proc/stat; echo ---; head -3 /proc/meminfo; echo ---; {gpu} echo; echo ---;"
-                       " cat /sys/class/devfreq/*.gpu/cur_freq 2>/dev/null | head -1")
+                       " cat /sys/class/devfreq/*.gpu/cur_freq 2>/dev/null | head -1; echo ---;"
+                       " grep eth0.11: /proc/net/dev")  # the DHU <-> T-Box link (car internet without Wi-Fi)
 
     def sample(self):
         script = self.script
         if self._count % self.TCAM_EVERY == 0:
-            script += "; echo ---; logcat -d -b main | grep onEsimStatus | tail -1"
+            script += "; echo ---; logcat -d -b main | grep -E 'onEsimStatus|posnFromSatlt' | tail -40"
         self._count += 1
         out = adb.run("-s", self.serial, "shell", script, timeout=8).stdout
         parts = out.split("---")
         if len(parts) < 3 or not parts[0].strip().startswith("cpu"):
             return None
-        if len(parts) > 4:  # keep the last known value when the line rotated out of the log
-            self.tcam = parse_tcam(parts[4]) or self.tcam
+        if len(parts) > 5:  # keep the last known value when the line rotated out of the log
+            lines = parts[5].strip().splitlines()
+            status = [line for line in lines if "onEsimStatus" in line]
+            self.tcam = (parse_tcam(status[-1]) if status else None) or self.tcam
+            gps = [p for p in map(vehicle.parse_position, lines) if p]
+            if gps:
+                self.gps = gps[-1]
+        tbox_bytes = None
+        if len(parts) > 4 and ":" in parts[4]:
+            fields = parts[4].split(":", 1)[1].split()
+            if len(fields) >= 9 and fields[0].isdigit() and fields[8].isdigit():
+                tbox_bytes = (int(fields[0]), int(fields[8]))  # rx, tx since the head unit booted
         hz = parts[3].split()[0] if len(parts) > 3 and parts[3].split() else ""
         times = cpu_times(parts[0].strip())
         cpu = cpu_percent(self._cpu, times) if self._cpu else None
@@ -155,7 +166,7 @@ class CarStats:
         used, total = mem_used(parts[1])
         gpu = next((v for v in map(parse_gpu, parts[2].strip().splitlines()) if v is not None), None)
         return {"cpu": cpu, "gpu": gpu, "gpu_mhz": int(hz) // 1_000_000 if hz.isdigit() else None,
-                "ram": (used, total), "tcam": self.tcam}
+                "ram": (used, total), "tcam": self.tcam, "gps": self.gps, "tbox_bytes": tbox_bytes}
 
 
 class HostStats:

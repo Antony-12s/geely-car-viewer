@@ -20,6 +20,7 @@ DEFAULTS = {
     "graph_seconds": 60,       # 30 / 60 / 120
     "show_host": True,
     "show_car": True,
+    "show_vehicle": True,      # car panel: battery, tires, gear, T-Box
     # remembered state
     "link": "wifi",            # wifi / usb
     "address": "",

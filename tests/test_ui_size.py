@@ -29,9 +29,9 @@ def test_size(tmp_path, size):
     try:
         if size == "large":  # an explicit choice is kept even when it overflows
             assert app.size_name == "large"
-        elif SCREEN in ("1920x1080", "1600x900", "1366x768", "2560x1440"):
+        elif SCREEN in ("1920x1080", "1600x900", "2560x1440"):
             assert app.size_name == "medium"  # auto never grows past medium
-        else:  # 1024x768, 1280x720
+        else:  # 1024x768, 1280x720, 1366x768 (the car panel makes medium 777 px tall)
             assert app.size_name == "small"
             assert root.winfo_width() <= width and root.winfo_height() <= height
         assert app.s["size"] == size  # the saved setting is not overwritten
