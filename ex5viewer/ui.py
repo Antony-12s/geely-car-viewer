@@ -22,7 +22,7 @@ from .widgets import Dot, MiniMeter, Segmented, Switch, corner_masks, palette, r
 log = logging.getLogger(__name__)
 
 BASE = {"main": (704, 440), "hud": (420, 252), "cluster": (420, 116)}
-SCALE = {"small": 0.8, "medium": 1.0, "large": 1.25}
+SCALE = {"small": 0.8, "medium": 1.1, "large": 1.375}  # medium/large +10% (user); small stays: 1004 px fits a 1024 screen
 DISPLAYS = {"main": 0, "hud": 1}       # Android display ids on the EX5
 CHIN, PAD, RADIUS = 48, 12, 22
 

@@ -7,4 +7,4 @@
 - **adb choice:** `$ADB`, then an installed Android SDK, then the bundled copy. Two adb versions on one PC kill each other's server and the car drops off.
 - **EX2:** main screen via the same path; cluster shown as "not supported" until someone with an EX2 checks `dumpsys display`.
 - **macOS build is Apple Silicon only** (GitHub retired Intel macOS runners), ad-hoc signed, not notarized.
-- **Window size "auto" (default):** medium, or small when medium does not fit the screen (screen minus 16 px width / 90 px height for title bar and taskbar). Never grows to large on its own: the user wanted a window that does not fill the screen. An explicit S/M/L choice is kept even if it overflows.
+- **Window size "auto" (default):** medium (screens 1.1×, user asked +10%), or small (0.8×, fits a 1024 px screen) when medium does not fit the screen (screen minus 16 px width / 90 px height for title bar and taskbar). Never grows to large on its own: the user wanted a window that does not fill the screen. An explicit S/M/L choice is kept even if it overflows.
