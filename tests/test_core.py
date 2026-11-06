@@ -254,6 +254,7 @@ def test_capture_script_sleeps_alongside_the_dump():
     assert "; wait; done" in script and "ffmpeg" in script and "kill $!" in script
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the script runs on the Linux cluster; needs /proc")
 def test_capture_script_removes_only_dead_sessions_files(tmp_path):
     """Run the cleanup part in a real sh: keeps the file of a live pid, drops dead ones and the old name."""
     import os, subprocess
