@@ -106,6 +106,54 @@ NETWORKS = {"FiveG": "5G", "FourG": "4G", "ThreeG": "3G", "TwoG": "2G"}
 OPERATORS = {"chinamobile": "China Mobile", "chinaunicom": "China Unicom", "chinatelecom": "China Telecom"}
 
 
+# MCC+MNC from the eSIM's IMSI -> carrier. The status log's operator says China Mobile on Thai cars
+# whose eSIM is TrueMove H, so the IMSI wins whenever TcamService has it.
+CARRIERS = {
+    "52000": "my by NT", "52001": "AIS", "52003": "AIS", "52004": "TrueMove H", "52005": "dtac",
+    "52015": "NT", "52018": "dtac", "52047": "NT", "52099": "TrueMove",
+    "46000": "China Mobile", "46002": "China Mobile", "46007": "China Mobile", "46001": "China Unicom",
+    "46006": "China Unicom", "46003": "China Telecom", "46011": "China Telecom",
+    "50501": "Telstra", "50502": "Optus", "50503": "Vodafone AU", "50219": "Celcom", "50212": "Maxis",
+}
+TCAM_INFO_FIELDS = ["du", "hw", "sxbl", "sxdi", "swbl", "swlx", "swlm", "imsi", "iccid", "msisdn", "imei", "tcam_id"]
+
+
+def parse_tcam_info(text):
+    """`service call tcam 133` (ITcamService.getTcamInfo, TcamService's cached copy) -> dict, or None.
+
+    Reply: status, non-null flag, then 12 String16 in writeToParcel order (part numbers, IMSI, ICCID...)."""
+    import re
+    words = [int(w, 16) for w in re.findall(r"0x[0-9a-f]+: ((?:[0-9a-f]{8} ?){1,4})", text) for w in w.split()]
+    if len(words) < 3 or words[0] != 0 or words[1] != 1:
+        return None
+    raw = b"".join(w.to_bytes(4, "little") for w in words)
+    pos, info = 8, {}
+    for name in TCAM_INFO_FIELDS:
+        if pos + 4 > len(raw):
+            return None
+        length = int.from_bytes(raw[pos:pos + 4], "little", signed=True)
+        pos += 4
+        if length < 0:
+            info[name] = None
+            continue
+        if length > 64:
+            return None
+        info[name] = raw[pos:pos + 2 * length].decode("utf-16-le", "replace").strip("\x00\x04 ")
+        pos += (2 * length + 2 + 3) // 4 * 4
+    iccid = (info.get("iccid") or "").rstrip("Ff")
+    if not iccid.isdigit():
+        return None
+    info["iccid"] = iccid
+    info["msisdn"] = info["msisdn"] if (info.get("msisdn") or "").strip("0") else None
+    return info
+
+
+def carrier(imsi):
+    if not imsi or not imsi.isdigit():
+        return None
+    return CARRIERS.get(imsi[:5]) or CARRIERS.get(imsi[:6]) or f"MCC {imsi[:3]} / {imsi[3:5]}"
+
+
 def parse_tcam(line):
     """The T-Box (TCAM) status the head unit logs every 2 s, e.g. `.eSIMConnectionStatus__ =
     ESIMConnectionStatus_FourGnetwork, .signallevl__ = 4, ... .operator__ = Operator_Chinamobile}`."""
@@ -131,7 +179,7 @@ class CarStats:
         self.serial = serial
         self._cpu = None
         self._count = 0
-        self.tcam = self.gps = None
+        self.tcam = self.gps = self.tcam_info = None
         gpu = " ".join(f"cat {path} 2>/dev/null | head -1;" for path in CAR_GPU_FILES)
         # GPU clock in Hz from devfreq (EX5: /sys/class/devfreq/e5000000.gpu), readable without root
         self.script = (f"head -1 /proc/stat; echo ---; head -3 /proc/meminfo; echo ---; {gpu} echo; echo ---;"
@@ -142,6 +190,8 @@ class CarStats:
         script = self.script
         if self._count % self.TCAM_EVERY == 0:
             script += "; echo ---; logcat -d -b main | grep -E 'onEsimStatus|posnFromSatlt' | tail -40"
+            if self.tcam_info is None:  # IDs and part numbers do not change: ask until we have them once
+                script += "; echo ---; service call tcam 133"
         self._count += 1
         out = adb.run("-s", self.serial, "shell", script, timeout=8).stdout
         parts = out.split("---")
@@ -151,6 +201,10 @@ class CarStats:
             lines = parts[5].strip().splitlines()
             status = [line for line in lines if "onEsimStatus" in line]
             self.tcam = (parse_tcam(status[-1]) if status else None) or self.tcam
+            if len(parts) > 6:
+                self.tcam_info = parse_tcam_info(parts[6]) or self.tcam_info
+            if self.tcam and self.tcam_info and carrier(self.tcam_info.get("imsi")):
+                self.tcam = {**self.tcam, "operator": carrier(self.tcam_info["imsi"])}
             gps = [p for p in map(vehicle.parse_position, lines) if p]
             if gps:
                 self.gps = gps[-1]
@@ -166,7 +220,7 @@ class CarStats:
         used, total = mem_used(parts[1])
         gpu = next((v for v in map(parse_gpu, parts[2].strip().splitlines()) if v is not None), None)
         return {"cpu": cpu, "gpu": gpu, "gpu_mhz": int(hz) // 1_000_000 if hz.isdigit() else None,
-                "ram": (used, total), "tcam": self.tcam, "gps": self.gps, "tbox_bytes": tbox_bytes}
+                "ram": (used, total), "tcam": self.tcam, "tcam_info": self.tcam_info, "gps": self.gps, "tbox_bytes": tbox_bytes}
 
 
 class HostStats:

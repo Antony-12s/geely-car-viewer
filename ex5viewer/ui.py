@@ -423,6 +423,8 @@ class App:
 
     def update_car_data(self, car):
         data = {"tcam": car.get("tcam"), "gps": car.get("gps")}
+        if car.get("tcam_info"):
+            data["tcam_info"] = car["tcam_info"]
         now, counters = time.monotonic(), car.get("tbox_bytes")
         if counters:
             last, self._tbox_last = self._tbox_last, (now, counters)

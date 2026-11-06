@@ -346,3 +346,29 @@ def test_vehicle_fallbacks_aosp_units():
     values = {("11600308", 0): 50000.0, ("11600309", 0): 24500.0, ("11600106", 0): 49000.0}
     car = vehicle.build(values)
     assert car["range_km"] == 50.0 and car["soc"] == 50.0
+
+
+def fake_tcam_parcel(strings):
+    """Hex dump in `service call` format for status 0, non-null, then String16s (made-up values)."""
+    raw = (0).to_bytes(4, "little") + (1).to_bytes(4, "little")
+    for text in strings:
+        data = text.encode("utf-16-le") + b"\x00\x00"
+        raw += len(text).to_bytes(4, "little") + data + b"\x00" * (-len(data) % 4)
+    raw += b"\x00" * 16
+    words = [int.from_bytes(raw[i:i + 4], "little") for i in range(0, len(raw), 4)]
+    lines = [f"  0x{i * 4:08x}: " + " ".join(f"{w:08x}" for w in words[i:i + 4]) + " '....'" for i in range(0, len(words), 4)]
+    return "Result: Parcel(\n" + "\n".join(lines) + ")"
+
+
+def test_tcam_info_parcel_and_carrier():
+    values = ["1111111111/A", "2222222222/A", "2222222222/A", "3333333333/A", "4444444444/A", "5555555555/B",
+              "6666666666/A", "520049999999999", "8966049999999999999F", "0000000000000000000\x04",
+              "359999999999999", "GO4G8966049999999999999F"]
+    info = stats.parse_tcam_info(fake_tcam_parcel(values))
+    assert info["iccid"] == "8966049999999999999" and info["imsi"] == "520049999999999"
+    assert info["hw"] == "2222222222/A" and info["swlx"] == "5555555555/B" and info["msisdn"] is None
+    assert info["tcam_id"].startswith("GO4G")
+    assert stats.carrier(info["imsi"]) == "TrueMove H"
+    assert stats.carrier("460001234567890") == "China Mobile" and stats.carrier("999991234") == "MCC 999 / 99"
+    assert stats.parse_tcam_info("Result: Parcel(00000000 ffffffb4 'error')") is None
+    assert stats.parse_tcam_info("") is None

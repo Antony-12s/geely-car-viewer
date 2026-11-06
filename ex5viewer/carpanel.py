@@ -26,8 +26,10 @@ class CarPanel(tk.Canvas):
         self.app, self.width = app, width
         self.data = {}
         self.tag_bind("map", "<Button-1>", lambda _e: self.open_map())
-        self.tag_bind("map", "<Enter>", lambda _e: self.configure(cursor="hand2"))
-        self.tag_bind("map", "<Leave>", lambda _e: self.configure(cursor=""))
+        self.tag_bind("info", "<Button-1>", lambda _e: TboxInfo(self.app, self.data.get("tcam_info")))
+        for tag in ("map", "info"):
+            self.tag_bind(tag, "<Enter>", lambda _e: self.configure(cursor="hand2"))
+            self.tag_bind(tag, "<Leave>", lambda _e: self.configure(cursor=""))
         self.draw()
 
     def update_data(self, **data):
@@ -128,6 +130,9 @@ class CarPanel(tk.Canvas):
         # T-Box: network + signal bars, GPS + heading + map link, data through the T-Box
         w = self.width - x
         self.card(x, w, "T-Box")
+        if connected and self.data.get("tcam_info"):
+            self.create_text(x + w - 12, 14, text=t("c_tbox_info") + " ⓘ", anchor="e", fill=pal["accent"],
+                             font=app.f_tiny, tags="info")
         tcam = self.data.get("tcam") if connected else None
         level = (tcam or {}).get("level") or 0
         sx, sy = x + 14, 44
@@ -164,3 +169,67 @@ class CarPanel(tk.Canvas):
                              fill=pal["muted"], font=app.f_num_small)
             self.create_text(tx, line2, text=t("c_since_boot", n=human_bytes(total)), anchor="w", fill=pal["muted"],
                              font=app.f_tiny)
+
+
+SECRET = ("iccid", "imsi", "imei", "tcam_id")  # identify the SIM/car: hidden until the user asks
+
+
+def mask(value):
+    return value[:6] + "•" * max(0, len(value) - 10) + value[-4:] if value and len(value) > 10 else value
+
+
+class TboxInfo(tk.Toplevel):
+    """T-Box identity and part numbers. SIM numbers are masked until "show" is clicked; click a value to copy."""
+
+    ROWS = [("iccid", "ICCID (eSIM)"), ("imsi", "IMSI"), ("imei", "IMEI"), ("tcam_id", "TCAM ID"),
+            ("carrier", None), ("hw", "HW"), ("swbl", "SW BL"), ("swlm", "SW LM"), ("swlx", "SW Lx"),
+            ("sxbl", "SX BL"), ("sxdi", "SX DI"), ("du", "DU")]
+
+    def __init__(self, app, info):
+        if not info:
+            return
+        from .stats import carrier
+        pal, t = app.pal, app.t
+        super().__init__(app.root, bg=pal["panel"], padx=22, pady=18)
+        self.title("T-Box")
+        self.resizable(False, False)
+        self.transient(app.root)
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.app, self.info, self.revealed = app, {**info, "carrier": carrier(info.get("imsi"))}, False
+        tk.Label(self, text=t("c_tbox_info"), bg=pal["panel"], fg=pal["text"], font=app.f_title).grid(
+            row=0, column=0, columnspan=2, sticky="w")
+        tk.Label(self, text=t("c_tbox_note"), bg=pal["panel"], fg=pal["muted"], font=app.f_tiny).grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        self.values = {}
+        for row, (key, label) in enumerate(self.ROWS, start=2):
+            if key == "hw":
+                tk.Frame(self, bg=pal["line"], height=1).grid(row=row * 2 - 1, column=0, columnspan=2, sticky="ew", pady=6)
+            tk.Label(self, text=label or t("c_carrier"), bg=pal["panel"], fg=pal["muted"], font=app.f_small,
+                     anchor="w", width=14).grid(row=row * 2, column=0, sticky="w")
+            value = tk.Label(self, bg=pal["panel"], fg=pal["text"], font=app.f_num, anchor="w", cursor="hand2")
+            value.grid(row=row * 2, column=1, sticky="w")
+            value.bind("<Button-1>", lambda _e, k=key: self.copy(k))
+            self.values[key] = value
+        foot = tk.Frame(self, bg=pal["panel"])
+        foot.grid(row=99, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        self.toggle = tk.Label(foot, bg=pal["panel2"], fg=pal["text"], font=app.f_small, padx=12, pady=4, cursor="hand2",
+                               highlightthickness=1, highlightbackground=pal["line"])
+        self.toggle.pack(side="left")
+        self.toggle.bind("<Button-1>", lambda _e: self.reveal(not self.revealed))
+        self.status = tk.Label(foot, bg=pal["panel"], fg=pal["live"], font=app.f_tiny)
+        self.status.pack(side="left", padx=10)
+        self.reveal(False)
+
+    def reveal(self, on):
+        self.revealed = on
+        for key, label in self.values.items():
+            value = self.info.get(key) or "–"
+            label.configure(text=value if on or key not in SECRET else mask(value))
+        self.toggle.configure(text=self.app.t("c_hide" if on else "c_show"))
+
+    def copy(self, key):
+        value = self.info.get(key)
+        if value:
+            self.clipboard_clear()
+            self.clipboard_append(value)
+            self.status.configure(text=self.app.t("c_copied", name=dict(self.ROWS).get(key) or key))
