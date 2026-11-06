@@ -22,7 +22,7 @@ jobs:
           - os: windows-latest
             target: windows
             asset: GeelyCarViewer-windows-x64.zip
-          - os: macos-14          # Apple Silicon
+          - os: macos-15          # Apple Silicon (macos-14 runners are retired)
             target: darwin
             asset: GeelyCarViewer-macos-arm64.zip
     runs-on: ${{ matrix.os }}
