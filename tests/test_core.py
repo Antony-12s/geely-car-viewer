@@ -279,6 +279,22 @@ def test_parse_tcam_from_head_unit_log():
     assert stats.parse_tcam("") is None and stats.parse_tcam("garbage") is None
 
 
+def test_linux_host_stats_skip_gpu_telemetry(monkeypatch):
+    def unexpected_probe(*args, **kwargs):
+        pytest.fail("Linux host stats must not probe the GPU")
+
+    monkeypatch.setattr(stats.sys, "platform", "linux")
+    monkeypatch.setattr(stats.shutil, "which", unexpected_probe)
+    monkeypatch.setattr(stats.subprocess, "run", unexpected_probe)
+    monkeypatch.setattr(stats, "open", unexpected_probe, raising=False)
+
+    sample = stats.HostStats().sample()
+
+    assert sample["gpu"] is None and sample["gpu_mhz"] is None
+    assert 0 <= sample["cpu"] <= 100
+    assert 0 <= sample["ram"][0] <= sample["ram"][1]
+
+
 def test_car_stats_parses_gpu_clock_and_tcam(monkeypatch):
     out = ("cpu  100 0 100 800 0 0 0 0 0 0\n---\nMemTotal: 8000 kB\nMemFree: 1000 kB\nMemAvailable: 2000 kB\n---\n"
            "gpu utilisation    : 58\ncompute utilisation: 7\n\n---\n106250000\n---\n"

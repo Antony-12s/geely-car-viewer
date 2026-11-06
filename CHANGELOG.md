@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.2
+
+- Disable host GPU telemetry on Linux while investigating system hangs associated with Intel i915 reset failures. Host CPU and RAM metrics and vehicle GPU metrics still update.
+
 ## 1.1.1
 
 ### New

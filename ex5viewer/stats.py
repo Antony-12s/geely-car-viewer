@@ -1,6 +1,4 @@
 """Traffic meters and CPU/GPU/RAM readings for this computer and the car."""
-import glob
-import os
 import shutil
 import subprocess
 import sys
@@ -224,59 +222,29 @@ class CarStats:
 
 
 class HostStats:
-    """CPU/RAM via psutil on every OS. GPU: Intel (RC6 idle time) or NVIDIA (nvidia-smi); else None."""
+    """CPU and RAM on every OS, plus NVIDIA GPU metrics where supported."""
 
     def __init__(self):
         psutil.cpu_percent(None)
-        self._rc6 = next(iter(glob.glob("/sys/class/drm/card*/gt/gt0/rc6_residency_ms")
-                              + glob.glob("/sys/class/drm/card*/power/rc6_residency_ms")), None)
-        self._rc6_last = None
-        # Intel actual GPU clock next to the RC6 file (newer kernels) or on the card (older ones)
-        self._freq = None
-        if self._rc6:
-            card = self._rc6.split("/gt/")[0].split("/power/")[0]
-            # cur, not act: act reads 0 whenever the GPU naps between frames, so the value kept vanishing
-            self._freq = next((p for p in (os.path.join(os.path.dirname(self._rc6), "rps_cur_freq_mhz"),
-                                           os.path.join(card, "gt_cur_freq_mhz")) if os.path.exists(p)), None)
-        self._nvidia = shutil.which("nvidia-smi") if not self._rc6 else None
-
-    def _gpu_mhz(self):
-        if self._freq:
-            try:
-                return int(open(self._freq).read())
-            except (OSError, ValueError):
-                return None
-        return self._nvidia_mhz
+        # Avoid driver telemetry calls on Linux while investigating i915 system hangs.
+        self._nvidia = None if sys.platform.startswith("linux") else shutil.which("nvidia-smi")
 
     def _gpu(self):
-        self._nvidia_mhz = None
-        if self._rc6:
-            # busy = time not spent in RC6 sleep; no root needed (perf counters are locked down)
-            try:
-                now = (time.monotonic(), int(open(self._rc6).read()))
-            except OSError:
-                return None
-            last, self._rc6_last = self._rc6_last, now
-            if not last:
-                return None
-            wall_ms = (now[0] - last[0]) * 1000
-            return max(0.0, min(100.0, 100 - 100 * (now[1] - last[1]) / wall_ms)) if wall_ms > 0 else None
         if self._nvidia:
             try:
                 out = subprocess.run([self._nvidia, "--query-gpu=utilization.gpu,clocks.gr",
                                       "--format=csv,noheader,nounits"],
                                      capture_output=True, text=True, timeout=3, **adb.NO_WINDOW).stdout
                 load, mhz = out.splitlines()[0].split(",")
-                self._nvidia_mhz = int(mhz)
-                return float(load)
+                return float(load), int(mhz)
             except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
-                return None
-        return None
+                pass
+        return None, None
 
     def sample(self):
         memory = psutil.virtual_memory()
-        gpu = self._gpu()
-        return {"cpu": psutil.cpu_percent(None), "gpu": gpu, "gpu_mhz": self._gpu_mhz(),
+        gpu, gpu_mhz = self._gpu()
+        return {"cpu": psutil.cpu_percent(None), "gpu": gpu, "gpu_mhz": gpu_mhz,
                 "ram": (memory.total - memory.available, memory.total)}
 
 
