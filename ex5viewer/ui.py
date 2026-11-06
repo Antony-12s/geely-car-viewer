@@ -15,6 +15,7 @@ from PIL import Image, ImageTk
 from . import __version__, adb, paths
 from .cluster import ClusterStream
 from .i18n import Translator
+from .settings import MAX_SCALE, MIN_SCALE
 from .scrcpy import TOUCH_DOWN, TOUCH_MOVE, TOUCH_UP, VideoStream
 from .carpanel import CarPanel
 from .vehicle import VehicleStats
@@ -131,6 +132,8 @@ class App:
         self.settings_panel = None
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         self.root.bind("<Escape>", lambda _e: self.close_settings())
+        self._building, self._resize_job = False, None
+        self.root.bind("<Configure>", self.on_configure)
         self.build()
         self.refresh()
         self.tick()
@@ -142,13 +145,56 @@ class App:
     def build(self):
         """Build the window. "auto" size: medium, or small when medium does not fit the screen."""
         reopen = self.settings_panel is not None
-        chosen = self.s["size"]
-        for self.size_name in ("medium", "small") if chosen == "auto" else (chosen,):
+        self._building = True
+        if self.s["scale"]:  # size picked by dragging the window corner
+            self.k = self.s["scale"]
+            self.size_name = "small" if self.k < 0.95 else "medium"  # compact layout tweaks below medium
             self._build_widgets()
-            if self.size_name == "small" or self.fits_screen():
-                break
+        else:
+            chosen = self.s["size"]
+            for self.size_name in ("medium", "small") if chosen == "auto" else (chosen,):
+                self.k = SCALE[self.size_name]
+                self._build_widgets()
+                if self.size_name == "small" or self.fits_screen():
+                    break
+        self.root.update_idletasks()
+        self._built_req = (self.root.winfo_reqwidth(), self.root.winfo_reqheight(), self.k)
+        req_w, req_h, k = self._built_req  # smallest drag size = this layout at MIN_SCALE
+        self.root.minsize(int(req_w - (k - MIN_SCALE) * (BASE["main"][0] + BASE["hud"][0])),
+                          int(req_h - (k - MIN_SCALE) * BASE["main"][1]))
+        self._building = False
         if reopen:
             self.toggle_settings()
+
+    # ---------- drag-to-resize ----------
+    def on_configure(self, event):
+        """Window dragged/maximised: rescale the screens to fill it (after the drag settles)."""
+        if event.widget is not self.root or self._building:
+            return
+        req_w, req_h, _k = self._built_req
+        if abs(event.width - req_w) <= 6 and abs(event.height - req_h) <= 6:
+            return  # our own layout, not the user
+        if self._resize_job:
+            self.root.after_cancel(self._resize_job)
+        self._resize_job = self.root.after(250, self.fit_to_window)
+
+    def fit_to_window(self):
+        """Pick the scale whose layout fits the window. Screen widths/heights grow linearly with the scale;
+        bars, chins and padding do not, so solve for k from the last layout and correct once if needed."""
+        self._resize_job = None
+        width, height = self.root.winfo_width(), self.root.winfo_height()
+        for _ in range(3):
+            req_w, req_h, k = self._built_req
+            fixed_w = req_w - k * (BASE["main"][0] + BASE["hud"][0])
+            fixed_h = req_h - k * BASE["main"][1]
+            new_k = min((width - fixed_w) / (BASE["main"][0] + BASE["hud"][0]), (height - fixed_h) / BASE["main"][1])
+            new_k = round(max(MIN_SCALE, min(MAX_SCALE, new_k)), 3)
+            if abs(new_k - k) < 0.01 and req_w <= width and req_h <= height:
+                return
+            self.s.set("scale", new_k)
+            self.build()
+            if self._built_req[0] <= width and self._built_req[1] <= height:
+                return
 
     def fits_screen(self):
         self.root.update_idletasks()
@@ -177,7 +223,7 @@ class App:
         if icon.is_file():
             self._icon = tk.PhotoImage(file=str(icon))
             self.root.iconphoto(True, self._icon)
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
         self.root.attributes("-topmost", bool(self.s["topmost"]))
         self.build_topbar()
         self.car_panel = None
@@ -197,7 +243,7 @@ class App:
         return self.detected_model or "EX5"
 
     def sizes(self):
-        k = SCALE[self.size_name]
+        k = self.k
         return {name: (int(w * k) // 2 * 2, int(h * k) // 2 * 2) for name, (w, h) in BASE.items()}
 
     def columns(self):
@@ -703,6 +749,13 @@ class App:
         """Called by the settings panel. Rebuilds or restarts only what the setting affects."""
         old = self.s.get(key)
         self.s.set(key, value)
+        if key == "size":  # a preset replaces the dragged size and lets the window shrink back to fit
+            changed = old != value or self.s["scale"]
+            self.s.set("scale", 0.0)
+            self.root.geometry("")
+            if changed:
+                self.build()
+            return
         if old == value:
             return
         if key in ("language", "theme", "size", "show_host", "show_car", "show_vehicle", "rotate_hud", "graph_seconds", "cluster_interval"):

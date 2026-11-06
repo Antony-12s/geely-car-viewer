@@ -10,6 +10,7 @@ DEFAULTS = {
     "language": "th",          # th / en
     "theme": "oled",           # oled / dark
     "size": "auto",            # auto (medium, small when the screen is too small) / small / medium / large
+    "scale": 0.0,              # screen scale picked by dragging the window corner; 0 = use "size"
     "topmost": False,
     "port": 5566,              # this car's adb port; plain IPs get it appended
     "auto_connect": True,
@@ -37,6 +38,9 @@ CHOICES = {
 }
 
 
+MIN_SCALE, MAX_SCALE = 0.8, 3.0  # below 0.8 (the small preset) the top bar no longer fits
+
+
 class Settings(dict):
     def __init__(self, path=None):
         super().__init__(DEFAULTS)
@@ -59,6 +63,8 @@ class Settings(dict):
             return value in CHOICES[key]
         if key == "port":
             return isinstance(value, int) and 0 < value < 65536
+        if key == "scale":
+            return isinstance(value, float) and (value == 0 or MIN_SCALE <= value <= MAX_SCALE)
         return isinstance(value, type(default))
 
     def set(self, key, value):

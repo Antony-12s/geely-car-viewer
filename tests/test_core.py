@@ -373,3 +373,12 @@ def test_tcam_info_parcel_and_carrier():
     assert stats.carrier("460001234567890") == "China Mobile" and stats.carrier("999991234") == "MCC 999 / 99"
     assert stats.parse_tcam_info("Result: Parcel(00000000 ffffffb4 'error')") is None
     assert stats.parse_tcam_info("") is None
+
+
+def test_scale_setting_bounds(tmp_path):
+    s = Settings(tmp_path / "s.json")
+    for bad in (0.5, 3.5, 1, "1.2"):
+        s.set("scale", bad)
+        assert s["scale"] == 0.0
+    s.set("scale", 1.6)
+    assert Settings(tmp_path / "s.json")["scale"] == 1.6
