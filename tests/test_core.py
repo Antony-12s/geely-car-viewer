@@ -264,3 +264,15 @@ def test_capture_script_removes_only_dead_sessions_files(tmp_path):
         path.write_bytes(b"BM")
     subprocess.run(["sh", "-c", stale], check=True)
     assert live.exists() and not dead.exists() and not old.exists()
+
+
+def test_parse_tcam_from_head_unit_log():
+    line = ("11-06 11:42:09.524  3105  3371 W ECARX TCAM: [TCAMServiceImpl] onEsimStatusoNotification{"
+            ".available__ = Available_Available, .eSIMConnectionStatus__ = ESIMConnectionStatus_FourGnetwork, "
+            ".hispeedfun__ = Hispeedfun_NotSupportHighSpeedFun, .signalstrength__ = 24, .signallevl__ = 4, "
+            ".ipadr__ = 10.137.11.196, .dataConnectionStatus__ = DataConnectionStatus_BothConnected, "
+            ".eSIMTrafficData__ = {.txbytecount__ = 0, .rxbytecount__ = 0}, .operator__ = Operator_Chinamobile}")
+    assert stats.parse_tcam(line) == {"network": "4G", "level": 4, "operator": "China Mobile"}
+    offline = line.replace("FourGnetwork", "NoNetwork").replace("Operator_Chinamobile", "Operator_Unknown")
+    assert stats.parse_tcam(offline) == {"network": None, "level": 4, "operator": None}
+    assert stats.parse_tcam("") is None and stats.parse_tcam("garbage") is None

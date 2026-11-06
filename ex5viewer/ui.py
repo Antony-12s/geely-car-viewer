@@ -111,6 +111,7 @@ class App:
         self.serial = self.address = self.model = None
         self.detected_model = None
         self.usb_list, self.ping, self.car_ok = [], None, True
+        self.tcam = None
         self.host_stats, self.car_stats = HostStats(), None
         self.press = None
         self.screens = {}
@@ -200,11 +201,18 @@ class App:
         self.model_chip.bind("<Button-1>", self.model_menu)
         self.link_seg = Segmented(top, [("wifi", "Wi‑Fi"), ("usb", "USB")], self.s["link"], pal, self.set_link, self.f_tiny)
         self.link_seg.pack(side="left", padx=(6, 0))
-        self.ping_label = tk.Label(top, bg=pal["panel"], fg=pal["muted"], font=self.f_small)
-        self.ping_label.pack(side="left", padx=(10, 0))
 
-        group = tk.Frame(conn, bg=pal["line"], padx=1, pady=1)
-        group.pack(anchor="w", pady=(8, 0))
+        # second row: address + button, then ping and T-Box (room the first row lacks in the small window)
+        row2 = tk.Frame(conn, bg=pal["panel"])
+        row2.pack(anchor="w", pady=(8, 0))
+        group = tk.Frame(row2, bg=pal["line"], padx=1, pady=1)
+        group.pack(side="left")
+        info = tk.Frame(row2, bg=pal["panel"])
+        info.pack(side="left", fill="y", padx=(10, 0))
+        self.ping_label = tk.Label(info, bg=pal["panel"], fg=pal["muted"], font=self.f_tiny, anchor="w")
+        self.ping_label.pack(anchor="w")
+        self.tcam_label = tk.Label(info, bg=pal["panel"], fg=pal["muted"], font=self.f_tiny, anchor="w")
+        self.tcam_label.pack(anchor="w")
         self.ip_var = tk.StringVar(value=self.s["address"])
         self.ip_entry = tk.Entry(group, textvariable=self.ip_var, width=19, bg=pal["panel2"], fg=pal["text"],
                                  relief="flat", insertbackground=pal["accent"], font=self.f_num,
@@ -256,7 +264,8 @@ class App:
         head = tk.Frame(right, bg=pal["panel2"])
         head.pack(fill="x")
         self.peak_label = tk.Label(head, bg=pal["panel2"], fg=pal["muted"], font=self.f_tiny)
-        self.peak_label.pack(side="right")  # packed first: keeps its room when the box is narrow
+        if self.size_name != "small":  # small window: the graph gets the room instead
+            self.peak_label.pack(side="right")  # packed first: keeps its room when the box is narrow
         if self.size_name != "small":  # no room for the caption next to the peak in the small window
             tk.Label(head, text=t("history", s=self.s["graph_seconds"]), bg=pal["panel2"], fg=pal["muted"],
                      font=self.f_tiny).pack(side="left")
@@ -401,6 +410,20 @@ class App:
             self.ping_label.configure(text=f"ping {self.ping:.0f} ms" if self.ping is not None else "ping –")
         else:
             self.ping_label.configure(text="")
+        self.tcam_label.configure(text=self.tcam_text() if self.conn == "connected" else "")
+
+    def tcam_text(self):
+        """T-Box line: `T-Box 4G ▮▮▮▯ China Mobile`, or no signal."""
+        tcam = self.tcam
+        if not tcam:
+            return ""
+        if not tcam["network"]:
+            return f"T-Box · {self.t('tcam_offline')}"
+        level = tcam["level"]
+        bars = "" if level is None else " " + "▮" * level + "▯" * (4 - level)
+        if self.size_name == "small":  # the network graph needs the width
+            return f"T-Box {tcam['network']}{bars}"
+        return f"T-Box {tcam['network']}{bars}" + (f" · {tcam['operator']}" if tcam["operator"] else "")
 
     def apply_control_look(self):
         main = self.screens.get("main")
@@ -763,6 +786,8 @@ class App:
             self.update_conn_ui()
         if self.conn == "connected":
             self.ping = ping if ping is not None else self.ping
+            if car:
+                self.tcam = car.get("tcam")
             ok = failures < 2
             if ok != self.car_ok:
                 self.car_ok = ok

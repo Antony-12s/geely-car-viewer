@@ -102,26 +102,56 @@ def parse_gpu(text):
     return float(value) if 0 <= value <= 100 else None
 
 
+NETWORKS = {"FiveG": "5G", "FourG": "4G", "ThreeG": "3G", "TwoG": "2G"}
+OPERATORS = {"chinamobile": "China Mobile", "chinaunicom": "China Unicom", "chinatelecom": "China Telecom"}
+
+
+def parse_tcam(line):
+    """The T-Box (TCAM) status the head unit logs every 2 s, e.g. `.eSIMConnectionStatus__ =
+    ESIMConnectionStatus_FourGnetwork, .signallevl__ = 4, ... .operator__ = Operator_Chinamobile}`."""
+    import re
+    fields = dict(re.findall(r"\.(\w+?)__ = ([\w.]+)", line))
+    if "eSIMConnectionStatus" not in fields:
+        return None
+    status = fields["eSIMConnectionStatus"].split("_", 1)[-1]
+    network = next((name for key, name in NETWORKS.items() if status.startswith(key)), None)
+    operator = fields.get("operator", "").split("_", 1)[-1]
+    level = fields.get("signallevl", "")
+    return {"network": network,
+            "level": min(int(level), 4) if level.isdigit() else None,
+            "operator": OPERATORS.get(operator.lower(), operator if operator not in ("", "Unknown") else None)}
+
+
 class CarStats:
-    """CPU/RAM/GPU of the head unit through one adb shell call per sample."""
+    """CPU/RAM/GPU of the head unit through one adb shell call per sample; T-Box status every 5th."""
+
+    TCAM_EVERY = 5  # the log dump reads ~1 MB on the car: every 10 s is plenty for a signal icon
 
     def __init__(self, serial):
         self.serial = serial
         self._cpu = None
+        self._count = 0
+        self.tcam = None
         gpu = " ".join(f"cat {path} 2>/dev/null | head -1;" for path in CAR_GPU_FILES)
         self.script = f"head -1 /proc/stat; echo ---; head -3 /proc/meminfo; echo ---; {gpu} echo"
 
     def sample(self):
-        out = adb.run("-s", self.serial, "shell", self.script, timeout=8).stdout
+        script = self.script
+        if self._count % self.TCAM_EVERY == 0:
+            script += "; echo ---; logcat -d -b main | grep onEsimStatus | tail -1"
+        self._count += 1
+        out = adb.run("-s", self.serial, "shell", script, timeout=8).stdout
         parts = out.split("---")
         if len(parts) < 3 or not parts[0].strip().startswith("cpu"):
             return None
+        if len(parts) > 3:  # keep the last known value when the line rotated out of the log
+            self.tcam = parse_tcam(parts[3]) or self.tcam
         times = cpu_times(parts[0].strip())
         cpu = cpu_percent(self._cpu, times) if self._cpu else None
         self._cpu = times
         used, total = mem_used(parts[1])
         gpu = next((v for v in map(parse_gpu, parts[2].strip().splitlines()) if v is not None), None)
-        return {"cpu": cpu, "gpu": gpu, "ram": (used, total)}
+        return {"cpu": cpu, "gpu": gpu, "ram": (used, total), "tcam": self.tcam}
 
 
 class HostStats:
