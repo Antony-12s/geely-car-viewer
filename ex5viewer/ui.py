@@ -362,9 +362,8 @@ class App:
             tk.Label(system.body, text=t(key), bg=pal["panel2"], fg=pal["accent"],
                      font=self.f_caption).grid(row=row, column=0, padx=(0, 8), sticky="w")
             cells = {}
-            for column, metric in enumerate(("CPU", "GPU", "RAM"), start=1):
-                if key == "pc" and metric == "GPU" and sys.platform.startswith("linux"):
-                    continue
+            metrics = ("CPU", "RAM") if key == "pc" and sys.platform.startswith("linux") else ("CPU", "GPU", "RAM")
+            for column, metric in enumerate(metrics, start=1):
                 cell = MiniMeter(system.body, metric, pal, self.f_small, self.f_num,
                                  width=max(40, (card_width - 80) // 3), value_chars=3)
                 cell.grid(row=row, column=column, padx=(0, 6), pady=(0, 7) if row == 0 else (0, 0))
@@ -898,7 +897,7 @@ class App:
             points = []
             for i, sample in enumerate(samples):
                 points += [(offset + i) * step, height - 2 - (height - 4) * sample[index] / top]
-            graph.create_line(points, fill=colour, width=2 if index == 0 else 1.5, smooth=False)
+            graph.create_line(points, fill=colour, width=2 if index == 0 else 1.5, smooth=True, capstyle="round", joinstyle="round")
         for age in self.history.drops:
             x = (slots - 1 - age) * step
             graph.create_line(x, 0, x, height, fill=pal["warn"], dash=(3, 3))
@@ -979,9 +978,6 @@ class App:
             for metric in ("cpu", "gpu"):
                 value = values[metric]
                 text = f"{value:.0f}%" if value is not None else "–"
-                if metric == "gpu" and values.get("gpu_mhz") and self.size_name != "small":
-                    # % is busy time at the current clock; the clock says how hard the GPU is pushed
-                    text += f" {values['gpu_mhz']}M"
                 if metric.upper() in cells:
                     cells[metric.upper()].set(text, value / 100 if value is not None else None)
             used, total = values["ram"]

@@ -1,5 +1,7 @@
 # Decisions
 
+- **Compact system meters:** Show GPU utilization as a percentage in the System card so the clock suffix cannot clip it. Linux PC RAM follows CPU directly while host GPU polling is disabled.
+
 - **Telemetry desktop layout:** Keep T-Box carrier, signal, GPS and data usage on the main page, with separate PC/car metric rows and a Wi-Fi/USB connection form. Vehicle cards open through the info button. Compact windows overlay the detail row to keep all controls on screen. HUD is above a larger cluster viewport, with letterboxing instead of stretching the display. Existing saved themes remain selectable.
 
 - **Linux host GPU telemetry:** Stop polling host GPU counters after repeated i915 reset failures around reported system hangs. This removes one driver interaction from the app while the freeze trigger is investigated. Keep host CPU/RAM and vehicle telemetry available.

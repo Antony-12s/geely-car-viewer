@@ -182,9 +182,7 @@ class CarPanel(tk.Canvas):
         self.card(x, w, "T-Box", "signal")
         info = self.data.get("tcam_info")
         if connected and info:
-            link = self.create_text(x + w - PAD, 16, text="ⓘ", anchor="e", fill=pal["accent"],
-                                    font=app.f_small, tags="info")
-            draw_icon(self, "info", self.bbox(link)[0] - 15, 10, 11, pal["accent"], width=1.2, tags="info")
+            draw_icon(self, "info", x + w - PAD - 12, 10, 12, pal["accent"], width=1.2, tags="info")
         tcam = self.data.get("tcam") if connected else None
         level = (tcam or {}).get("level") or 0
         row1, row2, row3 = 40, 62, 84

@@ -82,11 +82,15 @@ def test_telemetry_connection_and_vehicle_details(tmp_path, monkeypatch, languag
         texts = [app.tbox_panel.itemcget(item, "text") for item in app.tbox_panel.find_all()
                  if app.tbox_panel.type(item) == "text"]
         assert "4G  TrueMove H" in texts
+        assert "ⓘ" not in texts
+        if ui.sys.platform.startswith("linux"):
+            assert app.meters_box["pc"]["RAM"].grid_info()["column"] == 2
 
         app.show_stats({"cpu": 24, "gpu": None, "ram": (42, 100)},
-                       {"cpu": 31, "gpu": 38, "ram": (61, 100)}, 12, [], 0)
+                       {"cpu": 31, "gpu": 38, "gpu_mhz": 106, "ram": (61, 100)}, 12, [], 0)
         assert app.meters_box["pc"]["RAM"].value.cget("text") == "42%"
         assert app.meters_box["car"]["RAM"].value.cget("text") == "61%"
+        assert app.meters_box["car"]["GPU"].value.cget("text") == "38%"
         app.toggle_vehicle()
         assert app.meters_box["pc"]["RAM"].value.cget("text") == "42%"
         assert app.meters_box["car"]["RAM"].value.cget("text") == "61%"
