@@ -95,8 +95,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="ex5viewer")
     parser.add_argument("--selftest", action="store_true")
     parser.add_argument("--screenshot")
-    parser.add_argument("--linux-safe-rendering", action="store_true",
-                        help="Use software rendering and reduce display updates on Linux")
+    parser.add_argument("--linux-safe-rendering", action=argparse.BooleanOptionalAction, default=True,
+                        help="Use software rendering and reduce display updates on Linux (default)")
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args(argv)
     safe_rendering = args.linux_safe_rendering and sys.platform.startswith("linux")

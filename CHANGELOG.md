@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.3
+
+- Default to lower graphics load on Linux after Intel i915 reset failures. Request software GL, disable app animations, limit video to 12 fps, and wait for the user to connect.
+
 ## 1.1.2
 - Add APK Launchpad with multi-file drag and drop, batch progress, and optional temporary verifier handling for firmware 1.3.
 - Preserve HUD aspect ratio and prefer the regular ADB shell for Cluster capture.

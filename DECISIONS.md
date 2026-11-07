@@ -45,3 +45,5 @@
 - If the native Tk drag-and-drop extension cannot load, keep the APK file picker available. The macOS release runner exposed an incompatible Tcl stubs mechanism.
 
 - Add an opt-in Linux safe rendering mode after another i915 engine reset failure with host GPU polling already disabled. Limit app-side rendering load without changing kernel or compositor settings.
+
+- Default to safe rendering on Linux in 1.1.3 so every Linux entry point gets the mitigation, including unpacked downloads and existing launchers.
