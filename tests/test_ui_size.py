@@ -48,7 +48,7 @@ def test_telemetry_connection_and_vehicle_details(tmp_path, monkeypatch, languag
         assert app.tbox_panel.winfo_ismapped()
         assert app.ip_entry.winfo_ismapped()
         assert app.screens["hud"].canvas.winfo_y() < app.screens["cluster"].canvas.winfo_y()
-        assert app.screens["hud"].viewport[1] < app.screens["cluster"].viewport[1]
+        assert app.screens["hud"].viewport[1] > app.screens["cluster"].viewport[1]
 
         app.link_seg.move(1)
         root.update()
@@ -167,19 +167,27 @@ def test_apk_tab_targets_connected_vehicle(tmp_path, monkeypatch):
         app.quit()
 
 
-def test_hud_fills_its_viewport(tmp_path, monkeypatch):
+def test_hud_preserves_aspect_in_matching_frame(tmp_path, monkeypatch):
     from PIL import Image
     monkeypatch.setattr(ui.App, "stats_loop", lambda self: None)
     root, app = open_app(tmp_path, model="EX5")
     try:
         screen = app.screens["hud"]
         screen.state = "live"
-        screen.show(Image.new("RGB", (420, 252), "#ffffff"))
-        assert screen.image_bounds == (0, 0, *screen.viewport)
+        from ex5viewer.decoder import Decoder
+        import av
+        source = av.VideoFrame.from_image(Image.new("RGB", (1000, 600), "#ffffff"))
+        decoded = Decoder.to_image(source, *screen.viewport, preserve_aspect=True)
+        assert abs(decoded.width / decoded.height - 5 / 3) < 0.02
+        screen.show(decoded)
+        assert abs(screen.viewport[0] / screen.viewport[1] - 5 / 3) < 0.02
+        left, top, width, height = screen.image_bounds
+        assert abs(width / height - 5 / 3) < 0.02
+        assert left <= 2 and top <= 2
         assert screen.photo.width() == screen.viewport[0]
         from PIL import ImageTk
         rendered = ImageTk.getimage(screen.photo)
-        assert rendered.getpixel((0, 0))[:3] == (255, 255, 255)
-        assert rendered.getpixel((rendered.width - 1, rendered.height - 1))[:3] == (255, 255, 255)
+        assert rendered.getpixel((left, top))[:3] == (255, 255, 255)
+        assert rendered.getpixel((left + width - 1, top + height - 1))[:3] == (255, 255, 255)
     finally:
         app.quit()

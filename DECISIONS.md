@@ -33,3 +33,5 @@
 - APK Launchpad shares one selection path for file picker and native drops, and measures progress by completed ADB attempts.
 
 - HUD fills its assigned viewport, with decoder output matching that viewport to avoid a second aspect-fit shrink.
+
+- Correct HUD fill: use its native 5:3 frame geometry and preserve source aspect during decoding and display, with letterboxing for differing sources.

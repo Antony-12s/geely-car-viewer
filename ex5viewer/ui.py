@@ -51,10 +51,7 @@ class Screen:
     def __init__(self, app, parent, name, size):
         self.app, self.name, self.size = app, name, size
         self.viewport = size
-        if name in ("hud", "cluster"):
-            other = "cluster" if name == "hud" else "hud"
-            self.viewport = (size[0], app.sizes()[other][1])
-        if app.size_name == "small":
+        if app.size_name == "small" and name != "hud":
             self.viewport = (self.viewport[0], int(self.viewport[1] * 0.8))
         pal, w, h = app.pal, *self.viewport
         scale = min(w / size[0], h / size[1])
@@ -84,10 +81,7 @@ class Screen:
     def show(self, image):
         self.image = image
         picture = image
-        if self.name == "hud":
-            picture = image.resize(self.viewport, Image.Resampling.BILINEAR) if image.size != self.viewport else image
-            self.image_bounds = (0, 0, *self.viewport)
-        elif image.size != self.viewport:
+        if image.size != self.viewport:
             fitted = ImageOps.contain(image, self.viewport)
             picture = Image.new("RGB", self.viewport, self.app.pal["bezel"])
             picture.paste(fitted, ((self.viewport[0] - fitted.width) // 2, (self.viewport[1] - fitted.height) // 2))

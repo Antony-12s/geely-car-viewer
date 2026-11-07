@@ -194,7 +194,8 @@ class VideoStream(threading.Thread):
                 payload, config = config + payload, b""
             for frame in decoder.decode(payload):
                 width, height = self.size_fn()
-                self.on_frame(self.name_, Decoder.to_image(frame, width, height, self.rotate_fn()))
+                self.on_frame(self.name_, Decoder.to_image(frame, width, height, self.rotate_fn(),
+                                                          preserve_aspect=self.name_ == "hud"))
                 if not got_frame:
                     got_frame = True
                     self.on_state(self.name_, "live")

@@ -18,7 +18,10 @@ class Decoder:
         return self.ctx.decode(av.Packet(data))
 
     @staticmethod
-    def to_image(frame, width, height, rotate180=False):
+    def to_image(frame, width, height, rotate180=False, preserve_aspect=False):
+        if preserve_aspect:
+            scale = min(width / frame.width, height / frame.height)
+            width, height = max(1, round(frame.width * scale)), max(1, round(frame.height * scale))
         # one swscale pass does colour conversion and the downscale together
         image = frame.reformat(width=width, height=height, format="rgb24", interpolation="FAST_BILINEAR").to_image()
         return image.transpose(Image.Transpose.ROTATE_180) if rotate180 else image
