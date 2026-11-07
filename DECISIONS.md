@@ -29,3 +29,5 @@
 - Install selected APKs sequentially on one ADB target, preserving each file result and continuing after individual errors.
 
 - Give the APK queue the main workspace and group the target and ADB output in the sidebar.
+
+- APK Launchpad shares one selection path for file picker and native drops, and measures progress by completed ADB attempts.

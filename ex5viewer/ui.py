@@ -157,6 +157,8 @@ class App:
         self.apk_paths = ()
         self.apk_result = ""
         self.apk_size = self.apk_outcome = None
+        self.apk_done = 0
+        self.apk_current = ""
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         self.root.bind("<Escape>", lambda _e: self.close_settings())
         self._building, self._resize_job = False, None
@@ -433,12 +435,20 @@ class App:
         workspace = tk.Frame(panel, bg=panel["bg"])
         workspace.pack(fill="both", expand=True)
         workspace.grid_rowconfigure(0, weight=1)
-        workspace.grid_columnconfigure(0, weight=3, uniform="apk")
-        workspace.grid_columnconfigure(1, weight=2, uniform="apk")
+        workspace.grid_columnconfigure(0, minsize=158)
+        workspace.grid_columnconfigure(1, weight=3, uniform="apk")
+        workspace.grid_columnconfigure(2, weight=2, uniform="apk")
+        steps_card, steps = card(workspace, "apk_launchpad", 1)
+        steps_card.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        self.apk_steps = []
+        for number, key in enumerate(("apk_step_select", "apk_step_review", "apk_step_install", "apk_step_results"), 1):
+            step = label(steps, f"{number:02}  {t(key)}", "muted")
+            step.pack(fill="x", ipady=6)
+            self.apk_steps.append(step)
         queue_card, source = card(workspace, "apk_source", 1)
-        queue_card.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        queue_card.grid(row=0, column=1, sticky="nsew", padx=(0, 8))
         sidebar = tk.Frame(workspace, bg=panel["bg"])
-        sidebar.grid(row=0, column=1, sticky="nsew")
+        sidebar.grid(row=0, column=2, sticky="nsew")
         target_card, target = card(sidebar, "apk_device", 136)
         target_card.pack(fill="x", pady=(0, 8))
         self.apk_target = label(target, font=self.f_title)
@@ -450,13 +460,24 @@ class App:
 
         self.apk_file_size = label(source, color="muted")
         self.apk_file_size.pack(fill="x", pady=(0, 6))
+        self.apk_progress_text = label(source, color="muted")
+        self.apk_progress = tk.Canvas(source, height=8, bg=pal["track"], highlightthickness=0)
+        self.apk_progress.bind("<Configure>", lambda event: self.draw_apk_progress())
+        self.apk_drop = tk.Button(source, command=self.choose_apk, relief="flat",
+                                  bg=pal["accent_soft"], fg=pal["accent"], wraplength=180)
+        if hasattr(self.root, "TkdndVersion"):
+            from tkinterdnd2 import DND_FILES
+            self.apk_drop.configure(text=t("apk_drop"))
+            self.apk_drop.drop_target_register(DND_FILES)
+            self.apk_drop.dnd_bind("<<Drop>>", self.drop_apk)
+        else:
+            self.apk_drop.configure(text=t("apk_choose"))
         self.apk_files = tk.Listbox(source, height=2, bg=pal["bg"], fg=pal["text"],
                                     selectbackground=pal["seg_on"], selectforeground=pal["text"],
                                     relief="flat", highlightthickness=0, exportselection=False)
         files_scroll = tk.Scrollbar(source, command=self.apk_files.yview)
         self.apk_files.configure(yscrollcommand=files_scroll.set)
-        files_scroll.pack(side="right", fill="y")
-        self.apk_files.pack(side="left", fill="both", expand=True)
+        self.apk_files_scroll = files_scroll
 
         console_card, log_card = card(sidebar, "apk_log", 1)
         console_card.pack(fill="both", expand=True)
@@ -489,7 +510,25 @@ class App:
         transport = "USB" if self.s["link"] == "usb" else "Wi-Fi"
         self.apk_target.configure(text=f"{self.model or 'Android'}  /  {transport}" if serial else t("apk_offline"))
         self.apk_serial.set(serial or t("apk_connect"))
-        names = tuple(os.path.basename(path) for path in self.apk_paths) or (t("apk_no_file"),)
+        stage = 2 if self.apk_busy else 3 if self.apk_outcome and self.apk_done else 1 if self.apk_paths else 0
+        for index, step in enumerate(self.apk_steps):
+            step.configure(bg=self.pal["accent_soft" if index == stage else "panel2"],
+                           fg=self.pal["accent" if index == stage else "muted"])
+        if self.apk_paths:
+            self.apk_drop.pack_forget()
+            if not self.apk_files.winfo_manager():
+                self.apk_progress.pack(side="bottom", fill="x", pady=(3, 0))
+                self.apk_progress_text.pack(side="bottom", fill="x")
+                self.apk_files_scroll.pack(side="right", fill="y")
+                self.apk_files.pack(side="left", fill="both", expand=True)
+        elif not self.apk_drop.winfo_manager():
+            for widget in (self.apk_files, self.apk_files_scroll, self.apk_progress, self.apk_progress_text):
+                widget.pack_forget()
+            self.apk_drop.pack(fill="both", expand=True)
+        self.apk_progress_text.configure(text=t("apk_progress", done=self.apk_done, total=len(self.apk_paths))
+                                         + (f" · {self.apk_current}" if self.apk_current else ""))
+        self.draw_apk_progress()
+        names = tuple(os.path.basename(path) for path in self.apk_paths)
         if self.apk_files.get(0, "end") != names:
             self.apk_files.delete(0, "end")
             self.apk_files.insert("end", *names)
@@ -509,24 +548,47 @@ class App:
             self.apk_status.delete("1.0", "end")
             self.apk_status.insert("1.0", result)
             self.apk_status.configure(state="disabled")
+            self.apk_status.see("end")
 
     def choose_apk(self):
         filenames = filedialog.askopenfilenames(parent=self.root, filetypes=[("Android APK", "*.apk")])
-        if filenames:
-            try:
-                size = sum(os.path.getsize(filename) for filename in filenames)
-            except OSError as error:
-                self.apk_paths, self.apk_size = (), None
-                self.apk_outcome, self.apk_result = "apk_failed", str(error)
-            else:
-                self.apk_paths, self.apk_size = tuple(filenames), size
-                self.apk_outcome, self.apk_result = None, ""
+        self.select_apks(filenames)
+
+    def drop_apk(self, event):
+        filenames = self.root.tk.splitlist(event.data)
+        return "copy" if self.select_apks(filenames) else "refuse_drop"
+
+    def draw_apk_progress(self):
+        bar = self.apk_progress
+        bar.delete("progress")
+        if self.apk_done and self.apk_paths:
+            width = bar.winfo_width() * self.apk_done / len(self.apk_paths)
+            bar.create_rectangle(0, 0, width, bar.winfo_height(), fill=self.pal["accent"],
+                                 width=0, tags="progress")
+
+    def select_apks(self, filenames):
+        if self.apk_busy or not filenames:
+            return False
+        filenames = tuple(dict.fromkeys(filenames))
+        try:
+            if any(not name.lower().endswith(".apk") or not os.path.isfile(name) for name in filenames):
+                raise ValueError(self.t("apk_invalid"))
+            size = sum(os.path.getsize(filename) for filename in filenames)
+        except (OSError, ValueError) as error:
+            self.apk_outcome, self.apk_result = "apk_failed", str(error)
             self.update_apk_panel()
+            return False
+        self.apk_paths, self.apk_size = filenames, size
+        self.apk_done, self.apk_current = 0, ""
+        self.apk_outcome, self.apk_result = None, ""
+        self.update_apk_panel()
+        return True
 
     def install_apk(self):
         if self.apk_busy or not self.apk_paths or not self.serial or self.conn != "connected" or not self.car_ok:
             return
         self.apk_busy = True
+        self.apk_done, self.apk_current = 0, ""
         self.apk_result = self.t("apk_target", serial=self.serial)
         self.update_apk_panel()
         threading.Thread(target=self._install_apk, args=(self.serial, self.apk_paths), daemon=True).start()
@@ -534,6 +596,7 @@ class App:
     def _install_apk(self, serial, filenames):
         succeeded = 0
         for index, filename in enumerate(filenames, 1):
+            self.ui(lambda filename=filename: self.start_apk_file(filename))
             try:
                 output = adb.install_apk(serial, filename)
                 key = "apk_success"
@@ -546,7 +609,12 @@ class App:
                     self.record_apk(key, output, filename, index, len(filenames)))
         self.ui(lambda: self.finish_apk(succeeded, len(filenames)))
 
+    def start_apk_file(self, filename):
+        self.apk_current = os.path.basename(filename)
+        self.update_apk_panel()
+
     def record_apk(self, key, output, filename, index, total):
+        self.apk_done, self.apk_current = index, ""
         self.apk_result += f"\n\n[{index}/{total}] {filename}\n{self.t(key)}"
         if output:
             self.apk_result += f"\n{output}"

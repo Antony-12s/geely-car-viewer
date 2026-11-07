@@ -2,3 +2,5 @@ av>=14
 paramiko>=3.4
 Pillow>=10
 psutil>=5.9
+
+tkinterdnd2>=0.4,<0.5

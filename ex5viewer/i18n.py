@@ -1,6 +1,14 @@
 """UI strings in Thai and English."""
 
 STRINGS = {
+    "apk_launchpad": ("Launchpad", "Launchpad"),
+    "apk_step_select": ("เลือกไฟล์", "Select files"),
+    "apk_step_review": ("ตรวจคิว", "Review batch"),
+    "apk_step_install": ("ติดตั้ง", "Install"),
+    "apk_step_results": ("ดูผล", "Results"),
+    "apk_drop": ("ลากไฟล์ APK มาวางที่นี่\nหรือคลิกเพื่อเลือกหลายไฟล์", "Drop APK files here\nor click to choose files"),
+    "apk_progress": ("เสร็จ {done}/{total} ไฟล์", "{done}/{total} files processed"),
+    "apk_invalid": ("เลือกเฉพาะไฟล์ APK ที่เปิดได้", "Select existing APK files only."),
     "apk_title": ("ติดตั้ง APK บนหัวรถ", "Install APK on the head unit"),
     "apk_total": ("{count} ไฟล์ · รวม {size} MiB", "{count} files · {size} MiB total"),
     "apk_partial": ("บางไฟล์ไม่สำเร็จหรือยังไม่ทราบผล", "Some files failed or have unknown results"),

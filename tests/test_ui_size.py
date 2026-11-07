@@ -133,6 +133,12 @@ def test_apk_tab_targets_connected_vehicle(tmp_path, monkeypatch):
         app.choose_apk()
         assert app.apk_files.get(0, "end") == (apk.name, other.name)
         assert app.apk_size == 8
+        from types import SimpleNamespace
+        drop = SimpleNamespace(data=f"{{{apk}}} {{{other}}}")
+        assert app.drop_apk(drop) == "copy"
+        assert app.apk_paths == (str(apk), str(other))
+        assert app.drop_apk(SimpleNamespace(data="{wrong.txt}")) == "refuse_drop"
+        assert app.apk_paths == (str(apk), str(other))
         app.update_apk_panel()
         assert app.apk_install["state"] == "disabled"
         app.conn, app.serial = "connected", "192.0.2.5:5566"
@@ -153,6 +159,8 @@ def test_apk_tab_targets_connected_vehicle(tmp_path, monkeypatch):
         assert app.t("apk_success") in app.apk_result
         assert app.apk_state["text"] == app.t("apk_partial")
         assert "1/2" in app.apk_result
+        assert app.apk_done == 2
+        assert app.apk_progress.find_withtag("progress")
         assert "INSTALL_FAILED" in app.apk_result
         assert "Success" in app.apk_status.get("1.0", "end")
     finally:

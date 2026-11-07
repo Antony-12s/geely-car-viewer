@@ -7,7 +7,6 @@ import argparse
 import logging
 import sys
 import time
-import tkinter as tk
 
 from . import __version__, paths
 
@@ -90,7 +89,9 @@ def main(argv=None):
     from .settings import Settings
     from .ui import App
 
-    root = tk.Tk()
+    from tkinterdnd2 import TkinterDnD
+
+    root = TkinterDnD.Tk()
     settings = Settings(paths.config_dir() / "selftest.json") if args.selftest else Settings()
     app = App(root, settings, selftest=args.selftest)
     if args.selftest:

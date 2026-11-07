@@ -1,13 +1,13 @@
 # PyInstaller spec, same for all three OSes: pyinstaller ex5viewer.spec
 import sys
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 is_mac = sys.platform == "darwin"
 
 a = Analysis(
     ["run.py"],
-    datas=[("ex5viewer/resources", "resources")],
+    datas=[("ex5viewer/resources", "resources")] + collect_data_files("tkinterdnd2"),
     hiddenimports=collect_submodules("av") + ["PIL._tkinter_finder"],  # ImageTk loads it lazily
     excludes=["numpy", "pytest"],
 )
