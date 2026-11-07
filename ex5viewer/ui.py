@@ -84,7 +84,10 @@ class Screen:
     def show(self, image):
         self.image = image
         picture = image
-        if image.size != self.viewport:
+        if self.name == "hud":
+            picture = image.resize(self.viewport, Image.Resampling.BILINEAR) if image.size != self.viewport else image
+            self.image_bounds = (0, 0, *self.viewport)
+        elif image.size != self.viewport:
             fitted = ImageOps.contain(image, self.viewport)
             picture = Image.new("RGB", self.viewport, self.app.pal["bezel"])
             picture.paste(fitted, ((self.viewport[0] - fitted.width) // 2, (self.viewport[1] - fitted.height) // 2))
@@ -896,7 +899,7 @@ class App:
                                            frames_cb, state_cb, self.meters["main"], control=True,
                                            max_fps=self.s["max_fps"], reconnect=reconnect)
         if self.model == "EX5":
-            self.streams["hud"] = VideoStream("hud", self.serial, DISPLAYS["hud"], lambda: self.sizes()["hud"],
+            self.streams["hud"] = VideoStream("hud", self.serial, DISPLAYS["hud"], lambda: self.screens["hud"].viewport,
                                               frames_cb, state_cb, self.meters["hud"], max_fps=self.s["max_fps"],
                                               rotate_fn=lambda: self.s["rotate_hud"], reconnect=reconnect)
             if self.s["cluster_refresh"]:

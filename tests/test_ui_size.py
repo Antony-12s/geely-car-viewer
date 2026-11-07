@@ -165,3 +165,21 @@ def test_apk_tab_targets_connected_vehicle(tmp_path, monkeypatch):
         assert "Success" in app.apk_status.get("1.0", "end")
     finally:
         app.quit()
+
+
+def test_hud_fills_its_viewport(tmp_path, monkeypatch):
+    from PIL import Image
+    monkeypatch.setattr(ui.App, "stats_loop", lambda self: None)
+    root, app = open_app(tmp_path, model="EX5")
+    try:
+        screen = app.screens["hud"]
+        screen.state = "live"
+        screen.show(Image.new("RGB", (420, 252), "#ffffff"))
+        assert screen.image_bounds == (0, 0, *screen.viewport)
+        assert screen.photo.width() == screen.viewport[0]
+        from PIL import ImageTk
+        rendered = ImageTk.getimage(screen.photo)
+        assert rendered.getpixel((0, 0))[:3] == (255, 255, 255)
+        assert rendered.getpixel((rendered.width - 1, rendered.height - 1))[:3] == (255, 255, 255)
+    finally:
+        app.quit()

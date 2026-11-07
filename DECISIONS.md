@@ -31,3 +31,5 @@
 - Give the APK queue the main workspace and group the target and ADB output in the sidebar.
 
 - APK Launchpad shares one selection path for file picker and native drops, and measures progress by completed ADB attempts.
+
+- HUD fills its assigned viewport, with decoder output matching that viewport to avoid a second aspect-fit shrink.
