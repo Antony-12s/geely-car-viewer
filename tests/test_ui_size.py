@@ -127,10 +127,12 @@ def test_apk_tab_targets_connected_vehicle(tmp_path, monkeypatch):
         app.toggle_apk()
         apk = tmp_path / "demo app.apk"
         apk.write_bytes(b"demo")
-        monkeypatch.setattr(ui.filedialog, "askopenfilename", lambda **kwargs: str(apk))
+        other = tmp_path / "second.apk"
+        other.write_bytes(b"demo")
+        monkeypatch.setattr(ui.filedialog, "askopenfilenames", lambda **kwargs: (str(apk), str(other)))
         app.choose_apk()
-        assert app.apk_filename["text"] == apk.name
-        assert "4 bytes" in app.apk_file_size["text"]
+        assert app.apk_files.get(0, "end") == (apk.name, other.name)
+        assert app.apk_size == 8
         app.update_apk_panel()
         assert app.apk_install["state"] == "disabled"
         app.conn, app.serial = "connected", "192.0.2.5:5566"
@@ -140,14 +142,18 @@ def test_apk_tab_targets_connected_vehicle(tmp_path, monkeypatch):
 
         def install(serial, filename):
             calls.append((serial, filename))
+            if filename == str(apk):
+                raise RuntimeError("INSTALL_FAILED")
             return "Success"
 
         monkeypatch.setattr(ui.adb, "install_apk", install)
         monkeypatch.setattr(app, "ui", lambda callback: callback())
-        app._install_apk(app.serial, app.apk_path)
-        assert calls == [(app.serial, app.apk_path)]
+        app._install_apk(app.serial, app.apk_paths)
+        assert calls == [(app.serial, str(apk)), (app.serial, str(other))]
         assert app.t("apk_success") in app.apk_result
-        assert app.apk_state["text"] == app.t("apk_success")
+        assert app.apk_state["text"] == app.t("apk_partial")
+        assert "1/2" in app.apk_result
+        assert "INSTALL_FAILED" in app.apk_result
         assert "Success" in app.apk_status.get("1.0", "end")
     finally:
         app.quit()

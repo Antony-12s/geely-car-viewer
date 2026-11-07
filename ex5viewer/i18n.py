@@ -2,6 +2,9 @@
 
 STRINGS = {
     "apk_title": ("ติดตั้ง APK บนหัวรถ", "Install APK on the head unit"),
+    "apk_total": ("{count} ไฟล์ · รวม {size} MiB", "{count} files · {size} MiB total"),
+    "apk_partial": ("บางไฟล์ไม่สำเร็จหรือยังไม่ทราบผล", "Some files failed or have unknown results"),
+    "apk_summary": ("ยืนยันว่าติดตั้งสำเร็จ {succeeded}/{total} ไฟล์", "Confirmed installed: {succeeded}/{total} files"),
     "apk_intro": ("ตรวจไฟล์และหัวรถปลายทางก่อนกดติดตั้ง", "Review the file and destination before installing."),
     "apk_source": ("01  /  ไฟล์ติดตั้ง", "01  /  APK file"),
     "apk_device": ("02  /  หัวรถปลายทาง", "02  /  Target head unit"),

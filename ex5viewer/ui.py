@@ -154,7 +154,8 @@ class App:
         self.settings_panel = None
         self.vehicle_expanded = False
         self.apk_open = self.apk_busy = False
-        self.apk_path = self.apk_result = ""
+        self.apk_paths = ()
+        self.apk_result = ""
         self.apk_size = self.apk_outcome = None
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         self.root.bind("<Escape>", lambda _e: self.close_settings())
@@ -426,11 +427,14 @@ class App:
         for column, frame in enumerate((source, target)):
             row.grid_columnconfigure(column, weight=1, uniform="apk")
             frame.grid(row=0, column=column, sticky="nsew", padx=(0, 5) if column == 0 else (5, 0))
-        self.apk_filename = label(source)
-        self.apk_filename.pack(fill="x")
-        self.apk_location = detail(source)
+        self.apk_files = tk.Listbox(source, height=2, bg=pal["bg"], fg=pal["text"],
+                                    relief="flat", highlightthickness=0, exportselection=False)
+        files_scroll = tk.Scrollbar(source, command=self.apk_files.yview)
+        self.apk_files.configure(yscrollcommand=files_scroll.set)
         self.apk_file_size = label(source, color="muted")
         self.apk_file_size.pack(fill="x")
+        files_scroll.pack(side="right", fill="y")
+        self.apk_files.pack(side="left", fill="both", expand=True)
         self.apk_target = label(target)
         self.apk_target.pack(fill="x")
         self.apk_serial = detail(target)
@@ -477,16 +481,19 @@ class App:
         transport = "USB" if self.s["link"] == "usb" else "Wi-Fi"
         self.apk_target.configure(text=f"{self.model or 'Android'}  /  {transport}" if serial else t("apk_offline"))
         self.apk_serial.set(serial or t("apk_connect"))
-        self.apk_filename.configure(text=os.path.basename(self.apk_path) or t("apk_no_file"))
-        self.apk_location.set(self.apk_path or "—")
+        names = tuple(os.path.basename(path) for path in self.apk_paths) or (t("apk_no_file"),)
+        if self.apk_files.get(0, "end") != names:
+            self.apk_files.delete(0, "end")
+            self.apk_files.insert("end", *names)
         size = self.apk_size
-        self.apk_file_size.configure(text=f"{size / 1024**2:,.2f} MiB  ·  {size:,} bytes" if size is not None else "—")
+        self.apk_file_size.configure(text=t("apk_total", count=len(self.apk_paths), size=f"{size / 1024**2:,.2f}")
+                                     if size is not None else "—")
         self.apk_choose.configure(state="disabled" if self.apk_busy else "normal")
-        self.apk_install.configure(state="normal" if serial and self.apk_path and not self.apk_busy else "disabled")
+        self.apk_install.configure(state="normal" if serial and self.apk_paths and not self.apk_busy else "disabled")
         key = ("apk_pending" if self.apk_busy else self.apk_outcome or
-               ("apk_offline" if not serial else "apk_no_file" if not self.apk_path else "apk_ready"))
+               ("apk_offline" if not serial else "apk_no_file" if not self.apk_paths else "apk_ready"))
         color = {"apk_success": "live", "apk_pending": "accent", "apk_failed": "bad",
-                 "apk_timeout": "warn", "apk_ready": "accent"}.get(key, "muted")
+                 "apk_timeout": "warn", "apk_partial": "warn", "apk_ready": "accent"}.get(key, "muted")
         self.apk_state.configure(text=t(key), fg=self.pal[color])
         result = self.apk_result or t("apk_log_wait")
         if self.apk_status.get("1.0", "end-1c") != result:
@@ -496,40 +503,51 @@ class App:
             self.apk_status.configure(state="disabled")
 
     def choose_apk(self):
-        filename = filedialog.askopenfilename(parent=self.root, filetypes=[("Android APK", "*.apk")])
-        if filename:
+        filenames = filedialog.askopenfilenames(parent=self.root, filetypes=[("Android APK", "*.apk")])
+        if filenames:
             try:
-                size = os.path.getsize(filename)
+                size = sum(os.path.getsize(filename) for filename in filenames)
             except OSError as error:
-                self.apk_path, self.apk_size = "", None
+                self.apk_paths, self.apk_size = (), None
                 self.apk_outcome, self.apk_result = "apk_failed", str(error)
             else:
-                self.apk_path, self.apk_size = filename, size
+                self.apk_paths, self.apk_size = tuple(filenames), size
                 self.apk_outcome, self.apk_result = None, ""
             self.update_apk_panel()
 
     def install_apk(self):
-        if self.apk_busy or not self.apk_path or not self.serial or self.conn != "connected" or not self.car_ok:
+        if self.apk_busy or not self.apk_paths or not self.serial or self.conn != "connected" or not self.car_ok:
             return
         self.apk_busy = True
         self.apk_result = self.t("apk_target", serial=self.serial)
         self.update_apk_panel()
-        threading.Thread(target=self._install_apk, args=(self.serial, self.apk_path), daemon=True).start()
+        threading.Thread(target=self._install_apk, args=(self.serial, self.apk_paths), daemon=True).start()
 
-    def _install_apk(self, serial, filename):
-        try:
-            output = adb.install_apk(serial, filename)
-            key = "apk_success"
-        except subprocess.TimeoutExpired:
-            key, output = "apk_timeout", ""
-        except (RuntimeError, OSError) as error:
-            key, output = "apk_failed", str(error)
-        self.ui(lambda: self.finish_apk(key, serial, output))
+    def _install_apk(self, serial, filenames):
+        succeeded = 0
+        for index, filename in enumerate(filenames, 1):
+            try:
+                output = adb.install_apk(serial, filename)
+                key = "apk_success"
+                succeeded += 1
+            except subprocess.TimeoutExpired:
+                key, output = "apk_timeout", ""
+            except (RuntimeError, OSError) as error:
+                key, output = "apk_failed", str(error)
+            self.ui(lambda key=key, output=output, filename=filename, index=index:
+                    self.record_apk(key, output, filename, index, len(filenames)))
+        self.ui(lambda: self.finish_apk(succeeded, len(filenames)))
 
-    def finish_apk(self, key, serial, output):
+    def record_apk(self, key, output, filename, index, total):
+        self.apk_result += f"\n\n[{index}/{total}] {filename}\n{self.t(key)}"
+        if output:
+            self.apk_result += f"\n{output}"
+        self.update_apk_panel()
+
+    def finish_apk(self, succeeded, total):
         self.apk_busy = False
-        self.apk_outcome = key
-        self.apk_result = "\n".join(filter(None, (self.t(key), self.t("apk_target", serial=serial), output)))
+        self.apk_outcome = "apk_success" if succeeded == total else "apk_partial"
+        self.apk_result += "\n\n" + self.t("apk_summary", succeeded=succeeded, total=total)
         self.update_apk_panel()
 
     def build_screens(self):

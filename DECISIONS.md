@@ -25,3 +25,5 @@
 - **Motion:** one `animate()` helper (Tk `after`, ~60 fps, ease-out cubic, same key retargets instead of queueing, instant when the "animations" setting is off). Switch knob 160 ms, segmented pill 180 ms, meter bars 350 ms, car panel numbers/battery fill/tires 400 ms, settings panel slides 14 px in 170 ms (Tk frames have no opacity), T-Box dialog fades via `-alpha` where a compositor exists, status dot pulses (1.2 s) while connecting/reconnecting.
 
 - APK tab separates the local file, target head unit, and ADB output so users can verify the destination before installing and keep the result visible afterward.
+
+- Install selected APKs sequentially on one ADB target, preserving each file result and continuing after individual errors.
