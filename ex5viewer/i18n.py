@@ -1,6 +1,9 @@
 """UI strings in Thai and English."""
 
 STRINGS = {
+    "apk_override": ("เฟิร์มแวร์ 1.3: พักตัวตรวจ APK ของ ADB ชั่วคราวแล้วคืนค่า", "Firmware 1.3: temporarily pause ADB APK verification"),
+    "apk_restored": ("ตรวจแล้วว่าค่าตัวตรวจ ADB ตรงกับค่าเดิม", "Original ADB verifier setting verified."),
+    "apk_wait_restore": ("รอให้คิวติดตั้งจบและตรวจการคืนค่าก่อนปิดแอป", "Wait for the batch and verifier restoration check before closing."),
     "apk_launchpad": ("Launchpad", "Launchpad"),
     "apk_step_select": ("เลือกไฟล์", "Select files"),
     "apk_step_review": ("ตรวจคิว", "Review batch"),

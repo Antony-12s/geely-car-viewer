@@ -427,3 +427,30 @@ def test_install_apk_uses_selected_device(monkeypatch, output, succeeds):
     else:
         with pytest.raises(RuntimeError, match="INSTALL_FAILED_INVALID_APK"):
             adb.install_apk("vehicle", "/tmp/demo app.apk")
+
+
+@pytest.mark.parametrize("original", ["0", "1", "null"])
+def test_temporary_adb_verifier_restores_after_install_failure(monkeypatch, original):
+    from types import SimpleNamespace
+    from ex5viewer import adb
+
+    value = original
+    changes = []
+
+    def run(*args, **kwargs):
+        nonlocal value
+        assert args[:4] == ("-s", "head-unit", "shell", "settings")
+        operation, namespace, key, *values = args[4:]
+        assert (namespace, key) == ("global", "verifier_verify_adb_installs")
+        if operation != "get":
+            value = values[0] if operation == "put" else "null"
+            changes.append(value)
+        return SimpleNamespace(stdout=value + "\n")
+
+    monkeypatch.setattr(adb, "run", run)
+    with pytest.raises(RuntimeError, match="install failed"):
+        with adb.temporary_adb_verifier_override("head-unit"):
+            assert value == "0"
+            raise RuntimeError("install failed")
+    assert value == original
+    assert changes == ([] if original == "0" else ["0", original])

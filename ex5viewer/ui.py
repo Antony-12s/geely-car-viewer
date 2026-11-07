@@ -1,4 +1,5 @@
 """Geely Car Viewer window: top bar (connection, network graph, PC/car meters, settings) + one bezel per screen."""
+from contextlib import nullcontext
 import logging
 import os
 import queue
@@ -154,6 +155,7 @@ class App:
         self.apk_paths = ()
         self.apk_result = ""
         self.apk_size = self.apk_outcome = None
+        self.apk_override = tk.BooleanVar(master=root, value=False)
         self.apk_done = 0
         self.apk_current = ""
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
@@ -429,6 +431,12 @@ class App:
         self.apk_state = label(actions)
         self.apk_state.pack(side="left", padx=12, fill="x", expand=True)
 
+        self.apk_override_check = tk.Checkbutton(
+            panel, text=t("apk_override"), variable=self.apk_override,
+            bg=pal["bg"], fg=pal["text"], selectcolor=pal["panel2"],
+            activebackground=pal["bg"], activeforeground=pal["text"], anchor="w")
+        self.apk_override_check.pack(side="bottom", fill="x")
+
         workspace = tk.Frame(panel, bg=panel["bg"])
         workspace.pack(fill="both", expand=True)
         workspace.grid_rowconfigure(0, weight=1)
@@ -532,6 +540,7 @@ class App:
         size = self.apk_size
         self.apk_file_size.configure(text=t("apk_total", count=len(self.apk_paths), size=f"{size / 1024**2:,.2f}")
                                      if size is not None else "—")
+        self.apk_override_check.configure(state="disabled" if self.apk_busy else "normal")
         self.apk_choose.configure(state="disabled" if self.apk_busy else "normal")
         self.apk_install.configure(state="normal" if serial and self.apk_paths and not self.apk_busy else "disabled")
         key = ("apk_pending" if self.apk_busy else self.apk_outcome or
@@ -588,23 +597,32 @@ class App:
         self.apk_done, self.apk_current = 0, ""
         self.apk_result = self.t("apk_target", serial=self.serial)
         self.update_apk_panel()
-        threading.Thread(target=self._install_apk, args=(self.serial, self.apk_paths), daemon=True).start()
+        override = self.apk_override.get()
+        threading.Thread(target=self._install_apk, args=(self.serial, self.apk_paths, override),
+                         daemon=not override).start()
 
-    def _install_apk(self, serial, filenames):
+    def _install_apk(self, serial, filenames, override=False):
         succeeded = 0
-        for index, filename in enumerate(filenames, 1):
-            self.ui(lambda filename=filename: self.start_apk_file(filename))
-            try:
-                output = adb.install_apk(serial, filename)
-                key = "apk_success"
-                succeeded += 1
-            except subprocess.TimeoutExpired:
-                key, output = "apk_timeout", ""
-            except (RuntimeError, OSError) as error:
-                key, output = "apk_failed", str(error)
-            self.ui(lambda key=key, output=output, filename=filename, index=index:
-                    self.record_apk(key, output, filename, index, len(filenames)))
-        self.ui(lambda: self.finish_apk(succeeded, len(filenames)))
+        verifier = adb.temporary_adb_verifier_override(serial) if override else nullcontext()
+        try:
+            with verifier:
+                for index, filename in enumerate(filenames, 1):
+                    self.ui(lambda filename=filename: self.start_apk_file(filename))
+                    try:
+                        output = adb.install_apk(serial, filename)
+                        key = "apk_success"
+                        succeeded += 1
+                    except subprocess.TimeoutExpired:
+                        key, output = "apk_timeout", ""
+                    except (RuntimeError, OSError) as error:
+                        key, output = "apk_failed", str(error)
+                    self.ui(lambda key=key, output=output, filename=filename, index=index:
+                            self.record_apk(key, output, filename, index, len(filenames)))
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+            detail = str(error)
+            self.ui(lambda: self.finish_apk(succeeded, len(filenames), detail))
+        else:
+            self.ui(lambda: self.finish_apk(succeeded, len(filenames), restored=override))
 
     def start_apk_file(self, filename):
         self.apk_current = os.path.basename(filename)
@@ -617,9 +635,11 @@ class App:
             self.apk_result += f"\n{output}"
         self.update_apk_panel()
 
-    def finish_apk(self, succeeded, total):
+    def finish_apk(self, succeeded, total, error="", restored=False):
         self.apk_busy = False
-        self.apk_outcome = "apk_success" if succeeded == total else "apk_partial"
+        self.apk_outcome = "apk_failed" if error else "apk_success" if succeeded == total else "apk_partial"
+        if error or restored:
+            self.apk_result += "\n\n" + (error or self.t("apk_restored"))
         self.apk_result += "\n\n" + self.t("apk_summary", succeeded=succeeded, total=total)
         self.update_apk_panel()
 
@@ -1220,5 +1240,8 @@ class App:
             cells["RAM"].set(f"{100 * used / total:.0f}%" if total else "–", used / total if total else None)
 
     def quit(self):
+        if self.apk_busy and self.apk_override.get():
+            messagebox.showinfo(self.t("apk_title"), self.t("apk_wait_restore"), parent=self.root)
+            return
         self.stop_streams()
         self.root.destroy()

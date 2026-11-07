@@ -35,3 +35,5 @@
 - HUD fills its assigned viewport, with decoder output matching that viewport to avoid a second aspect-fit shrink.
 
 - Correct HUD fill: use its native 5:3 frame geometry and preserve source aspect during decoding and display, with letterboxing for differing sources.
+
+- Make the firmware 1.3 ADB verifier override opt-in per session and restore the exact previous setting in a verified cleanup step.

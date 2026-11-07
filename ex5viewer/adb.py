@@ -2,6 +2,8 @@
 import re
 import subprocess
 import sys
+import time
+from contextlib import contextmanager
 
 from . import paths
 
@@ -56,6 +58,40 @@ def connect(address):
     if "connected to" not in output:  # also matches "already connected to"
         return False, output or "adb connect failed"
     return True, output
+
+
+@contextmanager
+def temporary_adb_verifier_override(serial):
+    setting = "verifier_verify_adb_installs"
+
+    def settings(*args):
+        return run("-s", serial, "shell", "settings", *args, timeout=5, check=True).stdout.strip()
+
+    original = settings("get", "global", setting)
+    if original not in {"0", "1", "null"}:
+        raise RuntimeError(f"Unexpected ADB verifier value: {original!r}")
+    if original == "0":
+        yield
+        return
+
+    try:
+        settings("put", "global", setting, "0")
+        if settings("get", "global", setting) != "0":
+            raise RuntimeError("Could not disable the ADB verifier")
+        yield
+    finally:
+        restore = ("delete", "global", setting) if original == "null" else ("put", "global", setting, original)
+        for attempt in range(3):
+            try:
+                settings(*restore)
+                if settings("get", "global", setting) != original:
+                    raise RuntimeError("Readback did not match")
+                break
+            except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+                if attempt == 2:
+                    raise RuntimeError(f"ADB verifier restoration could not be confirmed on {serial}. "
+                                       f"Restore with: adb -s {serial} shell settings {' '.join(restore)}") from error
+                time.sleep(1)
 
 
 def install_apk(serial, filename):
