@@ -39,3 +39,5 @@
 - Make the firmware 1.3 ADB verifier override opt-in per session and restore the exact previous setting in a verified cleanup step.
 
 - Prefer the unprivileged ADB shell for the Cluster relay because firmware 1.3 rejects su; retain the legacy relay as a handshake fallback.
+
+- Publish release assets from a successful build matrix on the exact release commit. Tag creation does not publish partially built assets.

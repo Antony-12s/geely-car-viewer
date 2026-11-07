@@ -1,6 +1,8 @@
 # Changelog
 
 ## 1.1.2
+- Add APK Launchpad with multi-file drag and drop, batch progress, and optional temporary verifier handling for firmware 1.3.
+- Preserve HUD aspect ratio and prefer the regular ADB shell for Cluster capture.
 
 - Add the Telemetry theme and reorganize connection controls, separate PC/car metrics, persistent T-Box carrier status, and expandable vehicle details. HUD stays above the larger cluster viewport.
 

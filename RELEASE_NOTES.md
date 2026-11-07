@@ -1,15 +1,14 @@
 ## Geely Car Viewer 1.1.2
 
-- Add the Telemetry theme and reorganize connection controls, separate PC/car metrics, persistent T-Box carrier status, and expandable vehicle details. HUD stays above the larger cluster viewport.
+- Telemetry dashboard with separate PC and vehicle metrics, T-Box carrier status, and expandable vehicle details.
+- APK Launchpad with drag and drop, multiple-file installation, batch progress, and per-file ADB results. The optional firmware 1.3 mode temporarily pauses ADB APK verification and checks that the previous setting is restored.
+- HUD preserves the source aspect ratio. Cluster connects through the regular ADB shell first, with the previous relay available as a fallback.
+- Linux host GPU polling is disabled after Intel i915 reset failures. Vehicle GPU telemetry remains available.
 
-Host GPU telemetry is disabled on Linux as a precaution after system hangs with Intel i915 reset failures. Host CPU and RAM metrics and vehicle GPU metrics still update.
-
-Full history: [CHANGELOG.md](https://github.com/Antony-12s/geely-car-viewer/blob/main/CHANGELOG.md)
-
-| File | |
+| Download | Platform |
 |---|---|
-| `GeelyCarViewer-windows-x64.zip` | Windows 10/11 · SmartScreen may warn: More info → Run anyway |
-| `GeelyCarViewer-linux-x86_64.tar.gz` | Ubuntu 22.04+ · run `./install-linux.sh` to add it to the app menu |
-| `GeelyCarViewer-macos-arm64.zip` | Apple Silicon Mac · first launch: right-click → Open |
+| `GeelyCarViewer-windows-x64.zip` | Windows x64 |
+| `GeelyCarViewer-macos-arm64.zip` | macOS on Apple Silicon, ad-hoc signed |
+| `GeelyCarViewer-linux-x86_64.tar.gz` | Linux x86-64, built on Ubuntu 22.04 |
 
-Requires adb enabled on the head unit. The cluster view needs root (`su`) on the head unit. Car and T-Box data are read-only; nothing is sent to the car.
+ADB must be enabled on the head unit. The packages include the ADB binary.
