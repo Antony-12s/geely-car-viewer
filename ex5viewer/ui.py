@@ -155,6 +155,7 @@ class App:
         self.vehicle_expanded = False
         self.apk_open = self.apk_busy = False
         self.apk_path = self.apk_result = ""
+        self.apk_size = self.apk_outcome = None
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         self.root.bind("<Escape>", lambda _e: self.close_settings())
         self._building, self._resize_job = False, None
@@ -400,21 +401,59 @@ class App:
 
     def build_apk_panel(self):
         pal, t = self.pal, self.t
-        self.apk_panel = tk.Frame(self.screen_body, bg=pal["panel2"], padx=24, pady=22)
-        tk.Label(self.apk_panel, text=t("apk_title"), font=self.f_title,
-                 bg=pal["panel2"], fg=pal["text"]).pack(anchor="w")
-        self.apk_target = tk.Label(self.apk_panel, bg=pal["panel2"], fg=pal["muted"])
-        self.apk_target.pack(anchor="w", pady=(6, 16))
-        row = tk.Frame(self.apk_panel, bg=pal["panel2"])
+        panel = self.apk_panel = tk.Frame(self.screen_body, bg=pal["bg"], padx=20, pady=12)
+
+        def label(parent, text="", color="text", font=None):
+            return tk.Label(parent, text=text, fg=pal[color], bg=parent["bg"], anchor="w", font=font)
+
+        def card(parent, title):
+            frame = tk.Frame(parent, bg=pal["panel2"], padx=12, pady=7,
+                             highlightbackground=pal["line"], highlightthickness=1)
+            label(frame, t(title), "accent").pack(fill="x", pady=(0, 4))
+            return frame
+
+        def detail(parent):
+            value = tk.StringVar(master=parent)
+            tk.Entry(parent, textvariable=value, state="readonly", relief="flat", width=1, highlightthickness=0,
+                     readonlybackground=parent["bg"], fg=pal["muted"]).pack(fill="x")
+            return value
+
+        label(panel, t("apk_title"), font=self.f_title).pack(fill="x")
+        label(panel, t("apk_intro"), "muted").pack(fill="x", pady=(0, 7))
+        row = tk.Frame(panel, bg=panel["bg"])
         row.pack(fill="x")
-        self.apk_choose = tk.Button(row, text=t("apk_choose"), command=self.choose_apk)
-        self.apk_choose.pack(side="left", padx=(0, 8))
-        self.apk_install = tk.Button(row, text=t("apk_install"), command=self.install_apk,
-                                     bg=pal["accent"], fg=pal["accent_ink"])
-        self.apk_install.pack(side="left")
-        self.apk_status = tk.Text(self.apk_panel, height=5, wrap="word", bg=pal["bg"], fg=pal["text"],
-                                  relief="flat", padx=10, pady=8)
-        self.apk_status.pack(fill="x", pady=(14, 0))
+        source, target = card(row, "apk_source"), card(row, "apk_device")
+        for column, frame in enumerate((source, target)):
+            row.grid_columnconfigure(column, weight=1, uniform="apk")
+            frame.grid(row=0, column=column, sticky="nsew", padx=(0, 5) if column == 0 else (5, 0))
+        self.apk_filename = label(source)
+        self.apk_filename.pack(fill="x")
+        self.apk_location = detail(source)
+        self.apk_file_size = label(source, color="muted")
+        self.apk_file_size.pack(fill="x")
+        self.apk_target = label(target)
+        self.apk_target.pack(fill="x")
+        self.apk_serial = detail(target)
+        label(target, t("apk_replace"), "muted").pack(fill="x")
+
+        actions = tk.Frame(panel, bg=panel["bg"])
+        actions.pack(fill="x", pady=7)
+        self.apk_choose = tk.Button(actions, text=t("apk_choose"), command=self.choose_apk,
+                                    relief="flat", highlightthickness=0, bg=pal["seg_on"], fg=pal["text"], padx=12)
+        self.apk_choose.pack(side="left")
+        self.apk_install = tk.Button(actions, text=t("apk_install"), command=self.install_apk,
+                                     relief="flat", highlightthickness=0, bg=pal["accent"], fg=pal["accent_ink"], padx=12)
+        self.apk_install.pack(side="left", padx=8)
+        self.apk_state = label(actions)
+        self.apk_state.pack(side="left", fill="x", expand=True)
+        log_card = card(panel, "apk_log")
+        log_card.pack(fill="both", expand=True)
+        self.apk_status = tk.Text(log_card, height=2, wrap="word", bg=pal["bg"], fg=pal["text"],
+                                  relief="flat", highlightthickness=0, padx=8, pady=5, font="TkFixedFont")
+        scrollbar = tk.Scrollbar(log_card, command=self.apk_status.yview)
+        self.apk_status.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        self.apk_status.pack(fill="both", expand=True)
         self.show_apk_panel()
 
     def toggle_apk(self):
@@ -435,25 +474,45 @@ class App:
             return
         t = self.t
         serial = self.serial if self.conn == "connected" and self.car_ok else None
-        self.apk_target.configure(text=t("apk_target", serial=serial) if serial else t("apk_connect"))
+        transport = "USB" if self.s["link"] == "usb" else "Wi-Fi"
+        self.apk_target.configure(text=f"{self.model or 'Android'}  /  {transport}" if serial else t("apk_offline"))
+        self.apk_serial.set(serial or t("apk_connect"))
+        self.apk_filename.configure(text=os.path.basename(self.apk_path) or t("apk_no_file"))
+        self.apk_location.set(self.apk_path or "—")
+        size = self.apk_size
+        self.apk_file_size.configure(text=f"{size / 1024**2:,.2f} MiB  ·  {size:,} bytes" if size is not None else "—")
         self.apk_choose.configure(state="disabled" if self.apk_busy else "normal")
         self.apk_install.configure(state="normal" if serial and self.apk_path and not self.apk_busy else "disabled")
-        result = t("apk_pending") if self.apk_busy else self.apk_result
-        self.apk_status.configure(state="normal")
-        self.apk_status.delete("1.0", "end")
-        self.apk_status.insert("1.0", "\n".join(filter(None, (self.apk_path, result))))
-        self.apk_status.configure(state="disabled")
+        key = ("apk_pending" if self.apk_busy else self.apk_outcome or
+               ("apk_offline" if not serial else "apk_no_file" if not self.apk_path else "apk_ready"))
+        color = {"apk_success": "live", "apk_pending": "accent", "apk_failed": "bad",
+                 "apk_timeout": "warn", "apk_ready": "accent"}.get(key, "muted")
+        self.apk_state.configure(text=t(key), fg=self.pal[color])
+        result = self.apk_result or t("apk_log_wait")
+        if self.apk_status.get("1.0", "end-1c") != result:
+            self.apk_status.configure(state="normal")
+            self.apk_status.delete("1.0", "end")
+            self.apk_status.insert("1.0", result)
+            self.apk_status.configure(state="disabled")
 
     def choose_apk(self):
         filename = filedialog.askopenfilename(parent=self.root, filetypes=[("Android APK", "*.apk")])
         if filename:
-            self.apk_path, self.apk_result = filename, ""
+            try:
+                size = os.path.getsize(filename)
+            except OSError as error:
+                self.apk_path, self.apk_size = "", None
+                self.apk_outcome, self.apk_result = "apk_failed", str(error)
+            else:
+                self.apk_path, self.apk_size = filename, size
+                self.apk_outcome, self.apk_result = None, ""
             self.update_apk_panel()
 
     def install_apk(self):
         if self.apk_busy or not self.apk_path or not self.serial or self.conn != "connected" or not self.car_ok:
             return
         self.apk_busy = True
+        self.apk_result = self.t("apk_target", serial=self.serial)
         self.update_apk_panel()
         threading.Thread(target=self._install_apk, args=(self.serial, self.apk_path), daemon=True).start()
 
@@ -469,7 +528,8 @@ class App:
 
     def finish_apk(self, key, serial, output):
         self.apk_busy = False
-        self.apk_result = "\n".join(filter(None, (self.t(key), serial, output)))
+        self.apk_outcome = key
+        self.apk_result = "\n".join(filter(None, (self.t(key), self.t("apk_target", serial=serial), output)))
         self.update_apk_panel()
 
     def build_screens(self):

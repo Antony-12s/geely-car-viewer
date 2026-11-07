@@ -125,7 +125,12 @@ def test_apk_tab_targets_connected_vehicle(tmp_path, monkeypatch):
     root, app = open_app(tmp_path)
     try:
         app.toggle_apk()
-        app.apk_path = str(tmp_path / "demo app.apk")
+        apk = tmp_path / "demo app.apk"
+        apk.write_bytes(b"demo")
+        monkeypatch.setattr(ui.filedialog, "askopenfilename", lambda **kwargs: str(apk))
+        app.choose_apk()
+        assert app.apk_filename["text"] == apk.name
+        assert "4 bytes" in app.apk_file_size["text"]
         app.update_apk_panel()
         assert app.apk_install["state"] == "disabled"
         app.conn, app.serial = "connected", "192.0.2.5:5566"
@@ -142,5 +147,7 @@ def test_apk_tab_targets_connected_vehicle(tmp_path, monkeypatch):
         app._install_apk(app.serial, app.apk_path)
         assert calls == [(app.serial, app.apk_path)]
         assert app.t("apk_success") in app.apk_result
+        assert app.apk_state["text"] == app.t("apk_success")
+        assert "Success" in app.apk_status.get("1.0", "end")
     finally:
         app.quit()

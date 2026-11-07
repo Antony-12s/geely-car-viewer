@@ -2,6 +2,15 @@
 
 STRINGS = {
     "apk_title": ("ติดตั้ง APK บนหัวรถ", "Install APK on the head unit"),
+    "apk_intro": ("ตรวจไฟล์และหัวรถปลายทางก่อนกดติดตั้ง", "Review the file and destination before installing."),
+    "apk_source": ("01  /  ไฟล์ติดตั้ง", "01  /  APK file"),
+    "apk_device": ("02  /  หัวรถปลายทาง", "02  /  Target head unit"),
+    "apk_log": ("03  /  บันทึกจาก ADB", "03  /  ADB log"),
+    "apk_no_file": ("ยังไม่ได้เลือกไฟล์", "No file selected"),
+    "apk_offline": ("ยังไม่เชื่อมต่อหัวรถ", "Head unit disconnected"),
+    "apk_replace": ("ถ้ามีแอปเดิม จะติดตั้งทับโดยเก็บข้อมูลแอป", "Reinstalls over an existing app and keeps its data."),
+    "apk_ready": ("พร้อมติดตั้ง", "Ready to install"),
+    "apk_log_wait": ("ผลการติดตั้งจะแสดงที่นี่", "Installation output will appear here."),
     "apk_back": ("จอรถ", "Screens"),
     "apk_choose": ("เลือกไฟล์ APK", "Choose APK"),
     "apk_install": ("ติดตั้งบนรถ", "Install on vehicle"),
