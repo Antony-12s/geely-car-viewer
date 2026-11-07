@@ -37,3 +37,5 @@
 - Correct HUD fill: use its native 5:3 frame geometry and preserve source aspect during decoding and display, with letterboxing for differing sources.
 
 - Make the firmware 1.3 ADB verifier override opt-in per session and restore the exact previous setting in a verified cleanup step.
+
+- Prefer the unprivileged ADB shell for the Cluster relay because firmware 1.3 rejects su; retain the legacy relay as a handshake fallback.

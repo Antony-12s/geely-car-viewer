@@ -186,8 +186,10 @@ class ClusterStream(threading.Thread):
         super().__init__(daemon=True, name="cluster")
         self.serial, self.interval, self.size_fn = serial, interval, size_fn
         self.on_frame, self.on_state, self.meter, self.reconnect = on_frame, on_state, meter, reconnect
-        self.proxy_args = proxy_args or [adb.ADB, "-s", serial, "shell", "-T", "su", "0", "toybox", "nc", "-w", "3",
-                                         "-q", "1", CLUSTER_IP, "22"]  # -q: killing adb leaves nc running otherwise
+        shell = [adb.ADB, "-s", serial, "shell", "-T"]
+        relay = ["toybox", "nc", "-w", "3", "-q", "1", CLUSTER_IP, "22"]
+        self.proxy_args = proxy_args or shell + relay
+        self.legacy_proxy_args = None if proxy_args else shell + ["su", "0"] + relay
         self.stop_event = threading.Event()
         self._sock = self._transport = None
 
@@ -221,7 +223,15 @@ class ClusterStream(threading.Thread):
 
     def _session(self):
         self._sock = PipeSocket(self.proxy_args, self.meter)
-        transport = self._transport = open_transport(self._sock)
+        try:
+            transport = open_transport(self._sock)
+        except (paramiko.SSHException, OSError, EOFError):
+            if not self.legacy_proxy_args or self.stop_event.is_set():
+                raise
+            self._sock.close()
+            self._sock = PipeSocket(self.legacy_proxy_args, self.meter)
+            transport = open_transport(self._sock)
+        self._transport = transport
         ids = surface_ids(run(transport, ENV + " LayerManagerControl get surfaces"))
         if not ids:
             raise RuntimeError("no IVI surface on the cluster")
