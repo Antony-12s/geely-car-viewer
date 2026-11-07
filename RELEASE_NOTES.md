@@ -1,7 +1,8 @@
 ## Geely Car Viewer 1.1.2
 
 - Telemetry dashboard with separate PC and vehicle metrics, T-Box carrier status, and expandable vehicle details.
-- APK Launchpad with drag and drop, multiple-file installation, batch progress, and per-file ADB results. The optional firmware 1.3 mode temporarily pauses ADB APK verification and checks that the previous setting is restored.
+- English is the default for new installations. Thai remains available in settings.
+- APK Launchpad with drag and drop on supported systems and a file picker on all platforms, multiple-file installation, batch progress, and per-file ADB results. The optional firmware 1.3 mode temporarily pauses ADB APK verification and checks that the previous setting is restored.
 - HUD preserves the source aspect ratio. Cluster connects through the regular ADB shell first, with the previous relay available as a fallback.
 - Linux host GPU polling is disabled after Intel i915 reset failures. Vehicle GPU telemetry remains available.
 

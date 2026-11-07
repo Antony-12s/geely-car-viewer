@@ -7,6 +7,8 @@ import argparse
 import logging
 import sys
 import time
+import tkinter as tk
+from pathlib import Path
 
 from . import __version__, paths
 
@@ -67,10 +69,19 @@ def selftest(app, root, screenshot):
     if screenshot:
         try:  # macOS needs screen-recording permission; a missing picture is not an app failure
             from PIL import ImageGrab
-            root.update()
-            x, y = root.winfo_rootx(), root.winfo_rooty()
-            ImageGrab.grab(bbox=(x, y, x + root.winfo_width(), y + root.winfo_height())).save(screenshot)
-            report("screenshot:", screenshot)
+            def capture(path):
+                root.update()
+                x, y = root.winfo_rootx(), root.winfo_rooty()
+                ImageGrab.grab(bbox=(x, y, x + root.winfo_width(), y + root.winfo_height())).save(path)
+                report("screenshot:", path)
+
+            capture(screenshot)
+            app.toggle_apk()
+            try:
+                path = Path(screenshot)
+                capture(path.with_stem(path.stem + "-apk"))
+            finally:
+                app.toggle_apk()
         except Exception as error:
             report("screenshot skipped:", error)
     report(f"decoded {len(frames)} frames, window {root.winfo_width()}x{root.winfo_height()}")
@@ -91,7 +102,11 @@ def main(argv=None):
 
     from tkinterdnd2 import TkinterDnD
 
-    root = TkinterDnD.Tk()
+    root = tk.Tk()
+    try:
+        root.TkdndVersion = TkinterDnD._require(root)
+    except RuntimeError as error:
+        logging.warning("Native file drop unavailable: %s", error.__cause__ or error)
     settings = Settings(paths.config_dir() / "selftest.json") if args.selftest else Settings()
     app = App(root, settings, selftest=args.selftest)
     if args.selftest:

@@ -41,3 +41,5 @@
 - Prefer the unprivileged ADB shell for the Cluster relay because firmware 1.3 rejects su; retain the legacy relay as a handshake fallback.
 
 - Publish release assets from a successful build matrix on the exact release commit. Tag creation does not publish partially built assets.
+
+- If the native Tk drag-and-drop extension cannot load, keep the APK file picker available. The macOS release runner exposed an incompatible Tcl stubs mechanism.

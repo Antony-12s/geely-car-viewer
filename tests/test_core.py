@@ -209,13 +209,13 @@ def test_history_rates_and_drops():
 def test_settings_roundtrip_and_bad_values(tmp_path):
     path = tmp_path / "s.json"
     s = Settings(path)
-    s.set("language", "en")
+    s.set("language", "th")
     s.set("port", 99999)          # rejected
     s.set("max_fps", 45)          # not a choice
-    assert Settings(path)["language"] == "en"
+    assert Settings(path)["language"] == "th"
     assert Settings(path)["port"] == DEFAULTS["port"] and Settings(path)["max_fps"] == 30
     path.write_text("{not json")
-    assert Settings(path)["language"] == "th"  # broken file -> defaults, no crash
+    assert Settings(path)["language"] == "en"  # broken file -> defaults, no crash
     s.reset()
     assert dict(Settings(path)) == DEFAULTS
 

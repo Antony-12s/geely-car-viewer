@@ -7,7 +7,7 @@ from . import paths
 log = logging.getLogger(__name__)
 
 DEFAULTS = {
-    "language": "th",          # th / en
+    "language": "en",          # th / en
     "theme": "telemetry",      # telemetry / oled / dark
     "size": "auto",            # auto (medium, small when the screen is too small) / small / medium / large
     "scale": 0.0,              # screen scale picked by dragging the window corner; 0 = use "size"
