@@ -410,3 +410,20 @@ def test_motion_helpers():
     assert mid["soc"] == 30.0 and mid["speed_kmh"] == 50.0 and mid["gear"] == "D"
     assert mid["tires"] == {"fl": 32.0, "fr": 35.0}
     assert carpanel.interpolate(start, end, 1.0)["soc"] == 40.0
+
+
+@pytest.mark.parametrize("output, succeeds", [("Success\n", True), ("Failure [INSTALL_FAILED_INVALID_APK]", False)])
+def test_install_apk_uses_selected_device(monkeypatch, output, succeeds):
+    from types import SimpleNamespace
+
+    def run(*args, timeout):
+        assert args == ("-s", "vehicle", "install", "-r", "/tmp/demo app.apk")
+        assert timeout == 180
+        return SimpleNamespace(stdout=output, stderr="", returncode=0)
+
+    monkeypatch.setattr(adb, "run", run)
+    if succeeds:
+        assert adb.install_apk("vehicle", "/tmp/demo app.apk") == "Success"
+    else:
+        with pytest.raises(RuntimeError, match="INSTALL_FAILED_INVALID_APK"):
+            adb.install_apk("vehicle", "/tmp/demo app.apk")

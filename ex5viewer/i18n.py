@@ -1,6 +1,16 @@
 """UI strings in Thai and English."""
 
 STRINGS = {
+    "apk_title": ("ติดตั้ง APK บนหัวรถ", "Install APK on the head unit"),
+    "apk_back": ("จอรถ", "Screens"),
+    "apk_choose": ("เลือกไฟล์ APK", "Choose APK"),
+    "apk_install": ("ติดตั้งบนรถ", "Install on vehicle"),
+    "apk_target": ("หัวรถที่เชื่อมต่อ: {serial}", "Connected head unit: {serial}"),
+    "apk_connect": ("เชื่อมต่อหัวรถผ่าน Wi-Fi หรือ USB ก่อนติดตั้ง", "Connect the head unit over Wi-Fi or USB first."),
+    "apk_pending": ("กำลังติดตั้ง…", "Installing…"),
+    "apk_success": ("ติดตั้งสำเร็จ", "Installation succeeded"),
+    "apk_failed": ("ติดตั้งไม่สำเร็จ", "Installation failed"),
+    "apk_timeout": ("หมดเวลารอ ADB สถานะการติดตั้งยังไม่แน่ชัด", "ADB timed out. The installation status is unknown."),
     "vehicle_info": ("ข้อมูลรถ", "Vehicle info"),
     "connection_type": ("การเชื่อมต่อ", "Connection type"),
     "vehicle_model": ("รุ่นรถ", "Vehicle model"),

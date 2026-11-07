@@ -118,3 +118,29 @@ def test_touch_coordinates_include_screen_heading(tmp_path, monkeypatch):
         assert touches == []
     finally:
         app.quit()
+
+
+def test_apk_tab_targets_connected_vehicle(tmp_path, monkeypatch):
+    monkeypatch.setattr(ui.App, "stats_loop", lambda self: None)
+    root, app = open_app(tmp_path)
+    try:
+        app.toggle_apk()
+        app.apk_path = str(tmp_path / "demo app.apk")
+        app.update_apk_panel()
+        assert app.apk_install["state"] == "disabled"
+        app.conn, app.serial = "connected", "192.0.2.5:5566"
+        app.update_apk_panel()
+        assert app.apk_install["state"] == "normal"
+        calls = []
+
+        def install(serial, filename):
+            calls.append((serial, filename))
+            return "Success"
+
+        monkeypatch.setattr(ui.adb, "install_apk", install)
+        monkeypatch.setattr(app, "ui", lambda callback: callback())
+        app._install_apk(app.serial, app.apk_path)
+        assert calls == [(app.serial, app.apk_path)]
+        assert app.t("apk_success") in app.apk_result
+    finally:
+        app.quit()

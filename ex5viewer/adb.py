@@ -58,6 +58,15 @@ def connect(address):
     return True, output
 
 
+def install_apk(serial, filename):
+    """Install or update an APK on the explicitly selected device."""
+    result = run("-s", serial, "install", "-r", filename, timeout=180)
+    output = "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip())
+    if result.returncode or "Success" not in output.splitlines():
+        raise RuntimeError(output or "ADB install failed")
+    return output
+
+
 def disconnect(address):
     try:
         run("disconnect", address, timeout=5)

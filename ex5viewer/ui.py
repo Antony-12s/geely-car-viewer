@@ -8,7 +8,7 @@ import threading
 import time
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 from PIL import Image, ImageOps, ImageTk
 
@@ -153,6 +153,8 @@ class App:
         self.screens = {}
         self.settings_panel = None
         self.vehicle_expanded = False
+        self.apk_open = self.apk_busy = False
+        self.apk_path = self.apk_result = ""
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         self.root.bind("<Escape>", lambda _e: self.close_settings())
         self._building, self._resize_job = False, None
@@ -259,6 +261,7 @@ class App:
         if self.vehicle_expanded and self.s["show_vehicle"] and self.size_name != "small":
             self.vehicle_holder.pack(pady=(0, GAP))
         self.build_screens()
+        self.build_apk_panel()
         if self.vehicle_expanded and self.s["show_vehicle"] and self.size_name == "small":
             # Compact screens keep their size while the detail card opens over the picture.
             self.root.update_idletasks()
@@ -299,6 +302,11 @@ class App:
                                         activeforeground=pal["accent"], padx=12, takefocus=True)
         if self.s["show_vehicle"]:
             self.vehicle_button.pack(side="right", fill="y", padx=(0, GAP))
+
+        self.apk_tab = tk.Button(header, text="APK", command=self.toggle_apk,
+                                 bg=pal["panel2"], fg=pal["accent"], relief="flat",
+                                 font=self.f_small, padx=14)
+        self.apk_tab.pack(side="right", fill="y", padx=(0, GAP))
 
         conn = Card(self.root, pal, pal["bg"], total, 82)
         conn.pack(padx=PAGE, pady=(0, GAP))
@@ -390,10 +398,85 @@ class App:
         self.root.geometry("")
         self.build()
 
+    def build_apk_panel(self):
+        pal, t = self.pal, self.t
+        self.apk_panel = tk.Frame(self.screen_body, bg=pal["panel2"], padx=24, pady=22)
+        tk.Label(self.apk_panel, text=t("apk_title"), font=self.f_title,
+                 bg=pal["panel2"], fg=pal["text"]).pack(anchor="w")
+        self.apk_target = tk.Label(self.apk_panel, bg=pal["panel2"], fg=pal["muted"])
+        self.apk_target.pack(anchor="w", pady=(6, 16))
+        row = tk.Frame(self.apk_panel, bg=pal["panel2"])
+        row.pack(fill="x")
+        self.apk_choose = tk.Button(row, text=t("apk_choose"), command=self.choose_apk)
+        self.apk_choose.pack(side="left", padx=(0, 8))
+        self.apk_install = tk.Button(row, text=t("apk_install"), command=self.install_apk,
+                                     bg=pal["accent"], fg=pal["accent_ink"])
+        self.apk_install.pack(side="left")
+        self.apk_status = tk.Text(self.apk_panel, height=5, wrap="word", bg=pal["bg"], fg=pal["text"],
+                                  relief="flat", padx=10, pady=8)
+        self.apk_status.pack(fill="x", pady=(14, 0))
+        self.show_apk_panel()
+
+    def toggle_apk(self):
+        self.apk_open = not self.apk_open
+        self.show_apk_panel()
+
+    def show_apk_panel(self):
+        self.apk_tab.configure(text=self.t("apk_back") if self.apk_open else "APK")
+        if self.apk_open:
+            self.apk_panel.place(relwidth=1, relheight=1)
+            self.apk_panel.lift()
+        else:
+            self.apk_panel.place_forget()
+        self.update_apk_panel()
+
+    def update_apk_panel(self):
+        if not hasattr(self, "apk_panel"):
+            return
+        t = self.t
+        serial = self.serial if self.conn == "connected" and self.car_ok else None
+        self.apk_target.configure(text=t("apk_target", serial=serial) if serial else t("apk_connect"))
+        self.apk_choose.configure(state="disabled" if self.apk_busy else "normal")
+        self.apk_install.configure(state="normal" if serial and self.apk_path and not self.apk_busy else "disabled")
+        result = t("apk_pending") if self.apk_busy else self.apk_result
+        self.apk_status.configure(state="normal")
+        self.apk_status.delete("1.0", "end")
+        self.apk_status.insert("1.0", "\n".join(filter(None, (self.apk_path, result))))
+        self.apk_status.configure(state="disabled")
+
+    def choose_apk(self):
+        filename = filedialog.askopenfilename(parent=self.root, filetypes=[("Android APK", "*.apk")])
+        if filename:
+            self.apk_path, self.apk_result = filename, ""
+            self.update_apk_panel()
+
+    def install_apk(self):
+        if self.apk_busy or not self.apk_path or not self.serial or self.conn != "connected" or not self.car_ok:
+            return
+        self.apk_busy = True
+        self.update_apk_panel()
+        threading.Thread(target=self._install_apk, args=(self.serial, self.apk_path), daemon=True).start()
+
+    def _install_apk(self, serial, filename):
+        try:
+            output = adb.install_apk(serial, filename)
+            key = "apk_success"
+        except subprocess.TimeoutExpired:
+            key, output = "apk_timeout", ""
+        except (RuntimeError, OSError) as error:
+            key, output = "apk_failed", str(error)
+        self.ui(lambda: self.finish_apk(key, serial, output))
+
+    def finish_apk(self, key, serial, output):
+        self.apk_busy = False
+        self.apk_result = "\n".join(filter(None, (self.t(key), serial, output)))
+        self.update_apk_panel()
+
     def build_screens(self):
         pal, t, sizes = self.pal, self.t, self.sizes()
         body = tk.Frame(self.root, bg=pal["bg"], padx=PAGE)
         body.pack(pady=(GAP, PAGE))
+        self.screen_body = body
         model = self.layout_model()
         old = self.screens
         self.screens = {}
@@ -531,6 +614,8 @@ class App:
             self.ping_label.configure(text=f"ping {self.ping:.0f} ms" if self.ping is not None else "ping –")
         else:
             self.ping_label.configure(text="")
+        if self.apk_open:
+            self.update_apk_panel()
 
     def update_car_data(self, car):
         data = {"tcam": car.get("tcam"), "gps": car.get("gps")}
