@@ -5,6 +5,7 @@
 """
 import argparse
 import logging
+import os
 import sys
 import time
 import tkinter as tk
@@ -94,9 +95,16 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="ex5viewer")
     parser.add_argument("--selftest", action="store_true")
     parser.add_argument("--screenshot")
+    parser.add_argument("--linux-safe-rendering", action="store_true",
+                        help="Use software rendering and reduce display updates on Linux")
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args(argv)
+    safe_rendering = args.linux_safe_rendering and sys.platform.startswith("linux")
+    if safe_rendering:
+        os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
     setup_logging()
+    if safe_rendering:
+        logging.info("Linux safe rendering enabled: software GL, no animations, video capped at 12 fps")
     from .settings import Settings
     from .ui import App
 
@@ -108,7 +116,7 @@ def main(argv=None):
     except RuntimeError as error:
         logging.warning("Native file drop unavailable: %s", error.__cause__ or error)
     settings = Settings(paths.config_dir() / "selftest.json") if args.selftest else Settings()
-    app = App(root, settings, selftest=args.selftest)
+    app = App(root, settings, selftest=args.selftest, safe_rendering=safe_rendering)
     if args.selftest:
         code = selftest(app, root, args.screenshot)
         app.quit()

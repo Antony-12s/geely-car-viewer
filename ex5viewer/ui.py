@@ -132,8 +132,9 @@ class Screen:
 
 
 class App:
-    def __init__(self, root, settings, selftest=False):
+    def __init__(self, root, settings, selftest=False, safe_rendering=False):
         self.root, self.s, self.selftest = root, settings, selftest
+        self.safe_rendering = safe_rendering
         self.ui_tasks = queue.Queue()
         self.frames = {}                     # name -> newest PIL image (stream threads write)
         self.streams, self.meters = {}, {}
@@ -166,7 +167,7 @@ class App:
         self.refresh()
         self.tick()
         threading.Thread(target=self.stats_loop, daemon=True).start()
-        if settings["auto_connect"] and not selftest and self.can_auto_connect():
+        if settings["auto_connect"] and not selftest and not safe_rendering and self.can_auto_connect():
             self.root.after(300, self.connect)
 
     # ---------- build ----------
@@ -236,7 +237,7 @@ class App:
         self.settings_panel = None
         self.t = Translator(self.s["language"])
         self.pal = pal = palette(self.s["theme"])
-        widgets.ANIMATE = bool(self.s["animations"])
+        widgets.ANIMATE = bool(self.s["animations"]) and not self.safe_rendering
         thai = pick_font(["Noto Sans Thai", "Leelawadee UI", "Sukhumvit Set", "Thonburi", "Tahoma"], "TkDefaultFont")
         mono = pick_font(["Noto Sans Mono", "DejaVu Sans Mono", "Consolas", "Menlo", "Courier New"], "TkFixedFont")
         self.f_body, self.f_bold = (thai, 10), (thai, 10, "bold")   # secondary text, buttons
@@ -906,15 +907,18 @@ class App:
 
     def start_streams(self):
         reconnect = self.s["auto_reconnect"]
+        max_fps = self.s["max_fps"]
+        if self.safe_rendering:
+            max_fps = min(max_fps, 12)
         frames_cb = self.frame_from_worker
         state_cb = lambda name, state: self.ui(lambda: self.set_state(name, state))
         self.meters = {name: Meter() for name in ("main", "hud", "cluster")}
         self.streams["main"] = VideoStream("main", self.serial, DISPLAYS["main"], lambda: self.sizes()["main"],
                                            frames_cb, state_cb, self.meters["main"], control=True,
-                                           max_fps=self.s["max_fps"], reconnect=reconnect)
+                                           max_fps=max_fps, reconnect=reconnect)
         if self.model == "EX5":
             self.streams["hud"] = VideoStream("hud", self.serial, DISPLAYS["hud"], lambda: self.screens["hud"].viewport,
-                                              frames_cb, state_cb, self.meters["hud"], max_fps=self.s["max_fps"],
+                                              frames_cb, state_cb, self.meters["hud"], max_fps=max_fps,
                                               rotate_fn=lambda: self.s["rotate_hud"], reconnect=reconnect)
             if self.s["cluster_refresh"]:
                 self.start_cluster()
@@ -1108,7 +1112,7 @@ class App:
                 screen.show(image)
                 screen.fps_count += 1
                 screen.last_frame_at = time.monotonic()
-        self.root.after(15, self.refresh)
+        self.root.after(84 if self.safe_rendering else 15, self.refresh)
 
     def tick(self):
         down = up = 0

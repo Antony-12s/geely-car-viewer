@@ -43,3 +43,5 @@
 - Publish release assets from a successful build matrix on the exact release commit. Tag creation does not publish partially built assets.
 
 - If the native Tk drag-and-drop extension cannot load, keep the APK file picker available. The macOS release runner exposed an incompatible Tcl stubs mechanism.
+
+- Add an opt-in Linux safe rendering mode after another i915 engine reset failure with host GPU polling already disabled. Limit app-side rendering load without changing kernel or compositor settings.
