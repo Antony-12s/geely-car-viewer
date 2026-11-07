@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 DEFAULTS = {
     "language": "th",          # th / en
-    "theme": "oled",           # oled / dark
+    "theme": "telemetry",      # telemetry / oled / dark
     "size": "auto",            # auto (medium, small when the screen is too small) / small / medium / large
     "scale": 0.0,              # screen scale picked by dragging the window corner; 0 = use "size"
     "topmost": False,
@@ -33,7 +33,7 @@ DEFAULTS = {
 }
 
 CHOICES = {
-    "language": ["th", "en"], "theme": ["oled", "dark"], "size": ["auto", "small", "medium", "large"],
+    "language": ["th", "en"], "theme": ["telemetry", "oled", "dark"], "size": ["auto", "small", "medium", "large"],
     "max_fps": [15, 30, 60], "cluster_interval": [0.5, 1.0, 2.0, 5.0], "graph_seconds": [30, 60, 120],
     "link": ["wifi", "usb"], "model": ["auto", "EX5", "EX2"],
 }

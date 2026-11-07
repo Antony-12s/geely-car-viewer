@@ -63,6 +63,9 @@ def animate(widget, key, duration_ms, step, done=None):
 
 
 THEMES = {
+    "telemetry": dict(bg="#071c20", panel="#10292d", panel2="#10292d", line="#2f5154", bezel="#080f1c",
+                      bezel_line="#2f5154", track="#244347", text="#edfffa", muted="#b2d0ca", accent="#91f1c5",
+                      accent_ink="#102a22", accent_soft="#183e35", seg_on="#1c4440", down="#91f1c5"),
     "oled": dict(bg="#000000", panel="#070708", panel2="#0c0d0f", line="#1c1e23", bezel="#000000",
                  bezel_line="#16181c", track="#1a1d22"),
     "dark": dict(bg="#0d0f12", panel="#15181d", panel2="#0f1216", line="#262a31", bezel="#050607",
@@ -268,9 +271,19 @@ class Segmented(tk.Canvas):
         self.total = int(x + 2)
         self.pill = self._span(value)
         super().__init__(parent, width=self.total, height=height, bg=bg or pal["panel2"], highlightthickness=0,
-                         cursor="hand2")
+                         cursor="hand2", takefocus=True, highlightcolor=pal["accent"])
         self.bind("<Button-1>", self._click)
+        self.bind("<Left>", lambda _event: self.move(-1))
+        self.bind("<Right>", lambda _event: self.move(1))
+        self.bind("<FocusIn>", lambda _event: self.configure(highlightthickness=1))
+        self.bind("<FocusOut>", lambda _event: self.configure(highlightthickness=0))
         self.draw()
+
+    def move(self, direction):
+        values = [value for value, _label in self.options]
+        value = values[(values.index(self.value) + direction) % len(values)]
+        self.select(value)
+        self.command(value)
 
     def _click(self, event):
         for option, _label, x1, x2 in self.spans:

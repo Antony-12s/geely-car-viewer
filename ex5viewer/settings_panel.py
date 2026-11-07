@@ -35,7 +35,7 @@ class SettingsPanel(tk.Frame):
 
         self.group(left, t("g_general"))
         self.pick(left, t("s_language"), "language", [("th", "ไทย"), ("en", "English")])
-        self.pick(left, t("s_theme"), "theme", [("oled", t("theme_oled")), ("dark", t("theme_dark"))])
+        self.pick(left, t("s_theme"), "theme", [("telemetry", "Telemetry"), ("oled", t("theme_oled")), ("dark", t("theme_dark"))])
         self.pick(left, t("s_size"), "size", [("auto", t("size_auto")), ("small", t("size_small")),
                                               ("medium", t("size_medium")), ("large", t("size_large"))])
         self.switch(left, t("s_topmost"), "topmost", t("s_topmost_sub"))

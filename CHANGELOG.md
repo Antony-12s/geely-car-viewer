@@ -2,6 +2,8 @@
 
 ## 1.1.2
 
+- Add the Telemetry theme and reorganize connection controls, separate PC/car metrics, persistent T-Box carrier status, and expandable vehicle details. HUD stays above the larger cluster viewport.
+
 - Disable host GPU telemetry on Linux while investigating system hangs associated with Intel i915 reset failures. Host CPU and RAM metrics and vehicle GPU metrics still update.
 
 ## 1.1.1

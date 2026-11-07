@@ -1,6 +1,11 @@
 """UI strings in Thai and English."""
 
 STRINGS = {
+    "vehicle_info": ("ข้อมูลรถ", "Vehicle info"),
+    "connection_type": ("การเชื่อมต่อ", "Connection type"),
+    "vehicle_model": ("รุ่นรถ", "Vehicle model"),
+    "ip_address": ("IP และพอร์ต", "IP address and port"),
+    "usb_device": ("อุปกรณ์ USB", "USB device"),
     "main": ("จอกลาง", "Main"),
     "hud": ("HUD", "HUD"),
     "cluster": ("หน้าปัด", "Cluster"),

@@ -1,9 +1,9 @@
-"""Car panel under the top bar: battery, drive, tires and temperature cards over the main screen's column,
-and the T-Box card over the right column, so the card edges line up with the screens below."""
+"""Vehicle details and the always-visible T-Box telemetry card."""
 import tkinter as tk
 import webbrowser
 
 from .vehicle import compass
+from .stats import carrier
 from .widgets import (GAP, NUMBER_MS, PANEL_MS, RADIUS_CARD, RADIUS_CHIP, animate, baseline_text, draw_icon, lerp,
                       round_rect)
 
@@ -49,10 +49,10 @@ def interpolate(start, end, t):
 
 
 class CarPanel(tk.Canvas):
-    def __init__(self, app, parent, left, right):
-        """left / right: widths of the main and HUD columns below; the cards fill both with one GAP between."""
-        super().__init__(parent, width=left + GAP + right, height=HEIGHT, bg=app.pal["bg"], highlightthickness=0)
-        self.app, self.left, self.right = app, left, right
+    def __init__(self, app, parent, width, section="vehicle"):
+        """Show either the expandable vehicle cards or the persistent T-Box card."""
+        super().__init__(parent, width=width, height=HEIGHT, bg=app.pal["bg"], highlightthickness=0)
+        self.app, self.content_width, self.section = app, width, section
         self.data, self.shown = {}, None  # shown: interpolated car values while numbers animate
         self.tag_bind("map", "<Button-1>", lambda _e: self.open_map())
         self.tag_bind("info", "<Button-1>", lambda _e: TboxInfo(self.app, self.data.get("tcam_info")))
@@ -67,8 +67,7 @@ class CarPanel(tk.Canvas):
         self.data.update(data)
         after = self.data.get("car")
         if not (before and after) or before is after or "car" not in data:
-            if not self.shown:
-                self.draw()
+            self.draw()
             return
 
         def step(e):
@@ -100,14 +99,16 @@ class CarPanel(tk.Canvas):
         small = app.size_name == "small"
         connected = app.conn == "connected"
         car = self.shown or self.data.get("car") or {}
+        if self.section == "tbox":
+            self._card_tbox(0, self.content_width, connected, small)
+            return
         cards = [self._card_battery, self._card_drive, self._card_tires] + ([] if small else [self._card_temp])
         weights = [1.0, 1.0, 1.1] + ([] if small else [0.9])
-        widths = split(self.left - GAP * (len(cards) - 1), weights)
+        widths = split(self.content_width - GAP * (len(cards) - 1), weights)
         x = 0
         for draw_card, w in zip(cards, widths):
             draw_card(x, w, car, connected, small)
             x += w + GAP
-        self._card_tbox(self.left + GAP, self.right, connected, small)
 
     def _card_battery(self, x, w, car, connected, small):
         app, pal, t = self.app, self.app.pal, self.app.t
@@ -181,7 +182,7 @@ class CarPanel(tk.Canvas):
         self.card(x, w, "T-Box", "signal")
         info = self.data.get("tcam_info")
         if connected and info:
-            link = self.create_text(x + w - PAD, 16, text=t("c_tbox_info"), anchor="e", fill=pal["accent"],
+            link = self.create_text(x + w - PAD, 16, text="ⓘ", anchor="e", fill=pal["accent"],
                                     font=app.f_small, tags="info")
             draw_icon(self, "info", self.bbox(link)[0] - 15, 10, 11, pal["accent"], width=1.2, tags="info")
         tcam = self.data.get("tcam") if connected else None
@@ -197,12 +198,10 @@ class CarPanel(tk.Canvas):
         elif not tcam.get("network"):
             net = t("tcam_offline")
         else:
-            net = tcam["network"] + (f"  {tcam['operator']}" if tcam.get("operator") else "")
+            operator = carrier((info or {}).get("imsi")) or tcam.get("operator")
+            net = tcam["network"] + (f"  {operator}" if operator else "")
         self.create_text(x + PAD + 34, row1, text=net, anchor="w", fill=pal["text"], font=app.f_bold)
         rate, total = (self.data.get("tbox_rate"), self.data.get("tbox_total")) if connected else (None, None)
-        if rate and total is not None and not small:
-            self.create_text(x + w - PAD, row1, text=t("c_since_boot", n=human_bytes(total)), anchor="e",
-                             fill=pal["muted"], font=app.f_small)
 
         gps = self.data.get("gps") if connected else None
         if gps:
@@ -222,9 +221,11 @@ class CarPanel(tk.Canvas):
         else:
             self.create_text(x + PAD, row2, text="GPS –", anchor="w", fill=pal["muted"], font=app.f_small)
 
-        if rate and total is not None and not small:
-            self.create_text(x + PAD, row3, anchor="w", fill=pal["muted"], font=app.f_small,
-                             text=f"{t('c_via_tbox')}  ↓ {human_bytes(rate[0])}/s  ↑ {human_bytes(rate[1])}/s")
+        if total is not None:
+            text = t("c_since_boot", n=human_bytes(total))
+            if rate and not small:
+                text = f"↓ {human_bytes(rate[0])}/s  ↑ {human_bytes(rate[1])}/s · {human_bytes(total)}"
+            self.create_text(x + PAD, row3, text=text, anchor="w", fill=pal["muted"], font=app.f_small)
 
 
 SECRET = ("iccid", "imsi", "imei", "tcam_id")  # identify the SIM/car: hidden until the user asks

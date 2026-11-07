@@ -37,3 +37,80 @@ def test_size(tmp_path, size):
         assert app.s["size"] == size  # the saved setting is not overwritten
     finally:
         app.quit()
+
+
+@pytest.mark.parametrize("language", ["th", "en"])
+def test_telemetry_connection_and_vehicle_details(tmp_path, monkeypatch, language):
+    monkeypatch.setattr(ui.App, "stats_loop", lambda self: None)
+    root, app = open_app(tmp_path, language=language, theme="telemetry")
+    try:
+        assert not app.vehicle_holder.winfo_ismapped()
+        assert app.tbox_panel.winfo_ismapped()
+        assert app.ip_entry.winfo_ismapped()
+        assert app.screens["hud"].canvas.winfo_y() < app.screens["cluster"].canvas.winfo_y()
+        assert app.screens["hud"].viewport[1] < app.screens["cluster"].viewport[1]
+
+        app.link_seg.move(1)
+        root.update()
+        assert app.s["link"] == "usb"
+        assert app.usb_pick.winfo_ismapped()
+        assert not app.ip_entry.winfo_ismapped()
+        assert app.endpoint_label.cget("text") == app.t("usb_device")
+        app.set_model("EX2")
+        assert app.model_chip.value == "EX2"
+        app.set_link("wifi")
+        root.update()
+        assert app.ip_entry.winfo_ismapped()
+
+        app.toggle_vehicle()
+        root.update()
+        assert app.vehicle_holder.winfo_ismapped()
+        if SCREEN == "1024x768":
+            assert root.winfo_height() <= 768
+        app.toggle_vehicle()
+        root.update()
+        assert not app.vehicle_holder.winfo_ismapped()
+
+        app.conn = "connected"
+        app.update_car_data({"tcam": {"network": "4G", "operator": "AIS", "level": 3}})
+        texts = [app.tbox_panel.itemcget(item, "text") for item in app.tbox_panel.find_all()
+                 if app.tbox_panel.type(item) == "text"]
+        assert "4G  AIS" in texts
+
+        app.update_car_data({"tcam": {"network": "4G", "operator": "China Mobile", "level": 3},
+                             "tcam_info": {"imsi": "52004"}})
+        texts = [app.tbox_panel.itemcget(item, "text") for item in app.tbox_panel.find_all()
+                 if app.tbox_panel.type(item) == "text"]
+        assert "4G  TrueMove H" in texts
+
+        app.show_stats({"cpu": 24, "gpu": None, "ram": (42, 100)},
+                       {"cpu": 31, "gpu": 38, "ram": (61, 100)}, 12, [], 0)
+        assert app.meters_box["pc"]["RAM"].value.cget("text") == "42%"
+        assert app.meters_box["car"]["RAM"].value.cget("text") == "61%"
+        app.toggle_vehicle()
+        assert app.meters_box["pc"]["RAM"].value.cget("text") == "42%"
+        assert app.meters_box["car"]["RAM"].value.cget("text") == "61%"
+    finally:
+        app.quit()
+
+
+def test_touch_coordinates_include_screen_heading(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(ui.App, "stats_loop", lambda self: None)
+    root, app = open_app(tmp_path)
+    touches = []
+    stream = SimpleNamespace(touch=lambda *args: touches.append(args), stop=lambda: None)
+    try:
+        app.streams["main"] = stream
+        app.control_var.set(True)
+        image_x, image_y, width, height = app.screens["main"].image_bounds
+        app.on_touch(SimpleNamespace(type=tk.EventType.ButtonPress, x=ui.PAD + image_x + width / 2,
+                                    y=ui.PAD + ui.HEAD + image_y + height / 2))
+        assert touches[0][1:] == (0.5, 0.5)
+        touches.clear()
+        app.press = None
+        app.on_touch(SimpleNamespace(type=tk.EventType.ButtonPress, x=ui.PAD + width / 2, y=ui.PAD + 2))
+        assert touches == []
+    finally:
+        app.quit()

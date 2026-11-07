@@ -1,5 +1,7 @@
 ## Geely Car Viewer 1.1.2
 
+- Add the Telemetry theme and reorganize connection controls, separate PC/car metrics, persistent T-Box carrier status, and expandable vehicle details. HUD stays above the larger cluster viewport.
+
 Host GPU telemetry is disabled on Linux as a precaution after system hangs with Intel i915 reset failures. Host CPU and RAM metrics and vehicle GPU metrics still update.
 
 Full history: [CHANGELOG.md](https://github.com/Antony-12s/geely-car-viewer/blob/main/CHANGELOG.md)
