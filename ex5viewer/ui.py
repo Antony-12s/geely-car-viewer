@@ -407,51 +407,59 @@ class App:
         def label(parent, text="", color="text", font=None):
             return tk.Label(parent, text=text, fg=pal[color], bg=parent["bg"], anchor="w", font=font)
 
-        def card(parent, title):
-            frame = tk.Frame(parent, bg=pal["panel2"], padx=12, pady=7,
-                             highlightbackground=pal["line"], highlightthickness=1)
-            label(frame, t(title), "accent").pack(fill="x", pady=(0, 4))
-            return frame
+        def card(parent, title, height):
+            shell = Card(parent, pal, panel["bg"], width=1, height=height)
+            label(shell.body, t(title), "accent", self.f_title).pack(fill="x", pady=(0, 5))
+            return shell, shell.body
 
-        def detail(parent):
-            value = tk.StringVar(master=parent)
-            tk.Entry(parent, textvariable=value, state="readonly", relief="flat", width=1, highlightthickness=0,
-                     readonlybackground=parent["bg"], fg=pal["muted"]).pack(fill="x")
-            return value
+        hero = tk.Frame(panel, bg=pal["accent_soft"], padx=14, pady=8)
+        hero.pack(fill="x", pady=(0, 8))
+        tk.Label(hero, text="APK", bg=pal["accent"], fg=pal["accent_ink"], padx=10, pady=4,
+                 font=self.f_title).pack(side="left", padx=(0, 12))
+        label(hero, t("apk_title"), font=self.f_title).pack(fill="x")
+        label(hero, t("apk_intro"), "muted").pack(fill="x")
 
-        label(panel, t("apk_title"), font=self.f_title).pack(fill="x")
-        label(panel, t("apk_intro"), "muted").pack(fill="x", pady=(0, 7))
-        row = tk.Frame(panel, bg=panel["bg"])
-        row.pack(fill="x")
-        source, target = card(row, "apk_source"), card(row, "apk_device")
-        for column, frame in enumerate((source, target)):
-            row.grid_columnconfigure(column, weight=1, uniform="apk")
-            frame.grid(row=0, column=column, sticky="nsew", padx=(0, 5) if column == 0 else (5, 0))
+        actions = tk.Frame(panel, bg=panel["bg"])
+        actions.pack(side="bottom", fill="x", pady=(8, 0))
+        self.apk_choose = tk.Button(actions, text=t("apk_choose"), command=self.choose_apk,
+                                    relief="flat", bg=pal["seg_on"], fg=pal["text"], padx=14, pady=3)
+        self.apk_choose.pack(side="left")
+        self.apk_install = tk.Button(actions, text=t("apk_install"), command=self.install_apk,
+                                     relief="flat", bg=pal["accent"], fg=pal["accent_ink"], padx=14, pady=3)
+        self.apk_install.pack(side="right")
+        self.apk_state = label(actions)
+        self.apk_state.pack(side="left", padx=12, fill="x", expand=True)
+
+        workspace = tk.Frame(panel, bg=panel["bg"])
+        workspace.pack(fill="both", expand=True)
+        workspace.grid_rowconfigure(0, weight=1)
+        workspace.grid_columnconfigure(0, weight=3, uniform="apk")
+        workspace.grid_columnconfigure(1, weight=2, uniform="apk")
+        queue_card, source = card(workspace, "apk_source", 1)
+        queue_card.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        sidebar = tk.Frame(workspace, bg=panel["bg"])
+        sidebar.grid(row=0, column=1, sticky="nsew")
+        target_card, target = card(sidebar, "apk_device", 136)
+        target_card.pack(fill="x", pady=(0, 8))
+        self.apk_target = label(target, font=self.f_title)
+        self.apk_target.pack(fill="x")
+        self.apk_serial = tk.StringVar(master=target)
+        tk.Entry(target, textvariable=self.apk_serial, state="readonly", relief="flat", width=1,
+                 highlightthickness=0, readonlybackground=target["bg"], fg=pal["muted"]).pack(fill="x")
+        label(target, t("apk_replace"), "muted").pack(fill="x")
+
+        self.apk_file_size = label(source, color="muted")
+        self.apk_file_size.pack(fill="x", pady=(0, 6))
         self.apk_files = tk.Listbox(source, height=2, bg=pal["bg"], fg=pal["text"],
+                                    selectbackground=pal["seg_on"], selectforeground=pal["text"],
                                     relief="flat", highlightthickness=0, exportselection=False)
         files_scroll = tk.Scrollbar(source, command=self.apk_files.yview)
         self.apk_files.configure(yscrollcommand=files_scroll.set)
-        self.apk_file_size = label(source, color="muted")
-        self.apk_file_size.pack(fill="x")
         files_scroll.pack(side="right", fill="y")
         self.apk_files.pack(side="left", fill="both", expand=True)
-        self.apk_target = label(target)
-        self.apk_target.pack(fill="x")
-        self.apk_serial = detail(target)
-        label(target, t("apk_replace"), "muted").pack(fill="x")
 
-        actions = tk.Frame(panel, bg=panel["bg"])
-        actions.pack(fill="x", pady=7)
-        self.apk_choose = tk.Button(actions, text=t("apk_choose"), command=self.choose_apk,
-                                    relief="flat", highlightthickness=0, bg=pal["seg_on"], fg=pal["text"], padx=12)
-        self.apk_choose.pack(side="left")
-        self.apk_install = tk.Button(actions, text=t("apk_install"), command=self.install_apk,
-                                     relief="flat", highlightthickness=0, bg=pal["accent"], fg=pal["accent_ink"], padx=12)
-        self.apk_install.pack(side="left", padx=8)
-        self.apk_state = label(actions)
-        self.apk_state.pack(side="left", fill="x", expand=True)
-        log_card = card(panel, "apk_log")
-        log_card.pack(fill="both", expand=True)
+        console_card, log_card = card(sidebar, "apk_log", 1)
+        console_card.pack(fill="both", expand=True)
         self.apk_status = tk.Text(log_card, height=2, wrap="word", bg=pal["bg"], fg=pal["text"],
                                   relief="flat", highlightthickness=0, padx=8, pady=5, font="TkFixedFont")
         scrollbar = tk.Scrollbar(log_card, command=self.apk_status.yview)

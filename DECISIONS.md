@@ -27,3 +27,5 @@
 - APK tab separates the local file, target head unit, and ADB output so users can verify the destination before installing and keep the result visible afterward.
 
 - Install selected APKs sequentially on one ADB target, preserving each file result and continuing after individual errors.
+
+- Give the APK queue the main workspace and group the target and ADB output in the sidebar.
