@@ -455,22 +455,20 @@ def test_cluster_jpeg_frames_arrive_without_waiting_for_64k():
 
 def test_video_stream_stop_does_not_block_and_thread_cleans_up(tmp_path, monkeypatch):
     """F2: stop() runs on the Tk thread: no wait, no adb. The stream thread kills/reaps and removes the forward."""
-    log_file = tmp_path / "adb.log"
-    fake = tmp_path / "adb"
-    fake.write_text(f'#!/bin/sh\necho "$@" >> {log_file}\ncase "$*" in *"forward --remove"*) sleep 1;; esac\n')
-    fake.chmod(0o755)
-    monkeypatch.setattr(adb, "ADB", str(fake))
-    callers, real_run = [], adb.run
+    # Stub adb.run (no shell script, no real adb): runs on Windows, macOS and Linux alike.
+    callers = []
 
     def run(*args, **kwargs):
         callers.append((threading.current_thread().name, args))
-        return real_run(*args, **kwargs)
+        if "--remove" in args:
+            time.sleep(1)  # a slow adb server: must only ever delay the stream thread
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
     monkeypatch.setattr(adb, "run", run)
     stream = scrcpy.VideoStream("main", "serial", 0, lambda: (8, 8), lambda *a: None, lambda *a: None,
                                 stats.Meter(), reconnect=False)
     ready = threading.Event()
-    server = subprocess.Popen(["sleep", "30"])
+    server = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
 
     def session():
         stream._forward = 4321
@@ -491,8 +489,7 @@ def test_video_stream_stop_does_not_block_and_thread_cleans_up(tmp_path, monkeyp
     stream.join(10)
     assert not stream.is_alive()
     assert server.poll() is not None  # killed and reaped
-    assert "forward --remove tcp:4321" in log_file.read_text()
-    assert [name for name, args in callers if "--remove" in args] == ["video-main"]
+    assert [(name, args[2:]) for name, args in callers] == [("video-main", ("forward", "--remove", "tcp:4321"))]
 
 
 def test_pipe_socket_close_does_not_wait(monkeypatch):
