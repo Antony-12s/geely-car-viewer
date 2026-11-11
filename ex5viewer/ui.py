@@ -574,7 +574,7 @@ class App:
         workspace = tk.Frame(panel, bg=panel["bg"])
         workspace.pack(fill="both", expand=True)
         workspace.grid_rowconfigure(0, weight=1)
-        workspace.grid_columnconfigure(0, minsize=158)
+        workspace.grid_columnconfigure(0, minsize=172)  # fits "02  Review batch" with the CI (Noto) font
         workspace.grid_columnconfigure(1, weight=3, uniform="apk")
         workspace.grid_columnconfigure(2, weight=2, uniform="apk")
         steps_card, steps = card(workspace, "apk_launchpad", 1)
