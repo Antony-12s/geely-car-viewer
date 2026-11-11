@@ -1,4 +1,5 @@
-"""Geely Car Viewer window: top bar (connection, network graph, PC/car meters, settings) + one bezel per screen."""
+"""Geely Car Viewer window, "OLED cinema" layout: top bar (brand + status | connection, settings), a centred
+Main stage, a lower tray (HUD, Cluster, car data) and a quiet system floor (PC/car resources, app network)."""
 import logging
 import os
 import queue
@@ -20,17 +21,31 @@ from .scrcpy import TOUCH_DOWN, TOUCH_MOVE, TOUCH_UP, VideoStream
 from .carpanel import CarPanel
 from .vehicle import VehicleStats
 from .stats import CarStats, History, HostStats, Meter, human_gb, tcp_ping
-from .widgets import (GAP, PAGE, RADIUS_BEZEL, Card, Chip, Dot, IconButton, MiniMeter, Segmented, Switch,
-                      corner_masks, draw_icon, palette, round_rect)
+from .widgets import (GAP, PAGE, RADIUS_BEZEL, Chip, Dot, IconButton, MiniMeter, Segmented, Switch, draw_icon,
+                      measure, palette, round_rect)
 
 log = logging.getLogger(__name__)
 
-BASE = {"main": (704, 440), "hud": (420, 252), "cluster": (420, 116)}
-SCALE = {"small": 0.8, "medium": 1.1, "large": 1.375}  # medium/large +10% (user); small stays: 1004 px fits a 1024 screen
-DISPLAYS = {"main": 0, "hud": 1}       # Android display ids on the EX5
-CHIN, PAD, RADIUS = 48, 12, RADIUS_BEZEL  # bezel: picture inset PAD, chin below it
-TOP_H = 88                                 # top bar cards (connection, graph, meters) share this height
-GEAR = 36                                  # gear button: square, same radius as the cards
+# ---- "OLED cinema" geometry: everything below scales with k except text, bars and paddings ----
+MAIN_BASE = (704, 440)                     # Main picture at k = 1 (2560 × 1600, 16:10)
+SIDE_RATIO = 0.28                          # stage side column (title / control | note / stream) per Main width
+AUX_RATIO = 0.21                           # HUD / Cluster picture height per Main height (mockup 124 / 540)
+ROW_GAP = 10                               # stage -> tray -> floor
+ASPECT = {"hud": 800 / 480, "cluster": 1920 / 532}
+SCALE = {"small": 0.8, "medium": 1.1, "large": 1.375}  # small fits a 1024 px screen
+DISPLAYS = {"main": 0, "hud": 1}           # Android display ids on the EX5
+INSET = 2                                  # picture inset inside a screen canvas (room for the control outline)
+TOP_H = 52                                 # top bar: brand + status | connection + settings
+CTRL_H = 34                                # height of the top bar controls
+AUX_PAD, AUX_HEAD, AUX_FOOT = 7, 22, 24    # tray card: inner padding, title row, footer row
+FLOOR_H = 74                               # system floor (resources + app network)
+TITLE_W = 112                              # left title column of the floor blocks
+GEAR = 34                                  # kept for callers that size against the settings button
+RADIUS = RADIUS_BEZEL                      # tray screen cards
+
+
+def even(value):
+    return int(value) // 2 * 2
 
 
 def pick_font(candidates, fallback):
@@ -46,28 +61,20 @@ def open_path(path):
 
 
 class Screen:
-    """One bezel: picture canvas + chin. Owns its state text and the last frame."""
+    """One picture canvas. Owns its state text and the last frame. The labels around it (title, state, fps,
+    bandwidth) live in the stage side columns (Main) or the tray card (HUD, Cluster)."""
 
-    def __init__(self, app, parent, name, size):
-        self.app, self.name, self.size = app, name, size
+    def __init__(self, app, parent, name, size, bg):
+        self.app, self.name, self.size, self.inset = app, name, size, INSET
         pal, w, h = app.pal, *size
-        self.canvas = tk.Canvas(parent, width=w + 2 * PAD, height=h + PAD + CHIN, bg=pal["bg"], highlightthickness=0)
-        self.bezel = round_rect(self.canvas, 1, 1, w + 2 * PAD - 1, h + PAD + CHIN - 1, RADIUS,
-                                fill=pal["bezel"], outline=pal["bezel_line"], width=1)
+        self.bg = bg
+        self.canvas = tk.Canvas(parent, width=w + 2 * INSET, height=h + 2 * INSET, bg=bg, highlightthickness=0)
         self.photo = ImageTk.PhotoImage(Image.new("RGB", size, pal["bezel"]))
-        self.canvas.create_image(PAD, PAD, image=self.photo, anchor="nw", tags="frame")
-        corner_masks(self.canvas, PAD, PAD, w, h, 10, pal["bezel"], "mask")
-        self.chin = tk.Frame(self.canvas, bg=pal["bezel"], width=w, height=CHIN)
-        self.chin.pack_propagate(False)
-        self.canvas.create_window(PAD, PAD + h, window=self.chin, anchor="nw", width=w, height=CHIN)
+        self.canvas.create_image(INSET, INSET, image=self.photo, anchor="nw", tags="frame")
+        self.outline = self.canvas.create_rectangle(1, 1, w + 2 * INSET - 1, h + 2 * INSET - 1, outline=bg, width=2,
+                                                    tags="outline")
         self.has_frame, self.state, self.fps_count, self.last_frame_at = False, "idle", 0, None
         self.down_bytes = 0
-
-    def chin_label(self, text, fg=None, font=None, side="left", padx=(0, 0)):
-        label = tk.Label(self.chin, text=text, bg=self.app.pal["bezel"], fg=fg or self.app.pal["muted"],
-                         font=font or self.app.f_small)
-        label.pack(side=side, padx=padx)
-        return label
 
     def show(self, image):
         if image.size != self.size:
@@ -78,38 +85,40 @@ class Screen:
             self.draw_message()
 
     def set_outline(self, colour, width):
-        self.canvas.itemconfigure(self.bezel, outline=colour, width=width)
+        self.canvas.itemconfigure(self.outline, outline=colour, width=width)
 
     def draw_message(self):
         canvas, (w, h), pal, app, t = self.canvas, self.size, self.app.pal, self.app, self.app.t
         canvas.delete("message")
         key = {"idle": "msg_idle", "connecting": "msg_connecting", "reconnecting": "msg_reconnecting",
                "error": "msg_error", "paused": "msg_paused"}.get(self.state)
-        if not key or (self.state == "paused" and not self.has_frame):
-            if self.state == "paused":
-                key = "msg_paused"
-            else:
-                return
+        if not key:
+            return
+        x0 = y0 = INSET
         if self.has_frame and self.state != "idle":
             colour = pal["warn"] if self.state in ("reconnecting", "paused") else pal["bad"] if self.state == "error" else pal["line"]
-            canvas.create_rectangle(PAD, PAD + h - 32, PAD + w, PAD + h, fill=pal["panel"], outline="", tags="message")
-            canvas.create_line(PAD, PAD + h - 32, PAD + w, PAD + h - 32, fill=colour, tags="message")
-            canvas.create_text(PAD + 12, PAD + h - 16, text=t(key), fill=pal["text"], font=app.f_small,
-                               anchor="w", tags="message")
+            bar = 24 if h < 200 else 32
+            canvas.create_rectangle(x0, y0 + h - bar, x0 + w, y0 + h, fill=pal["panel"], outline="", tags="message")
+            canvas.create_line(x0, y0 + h - bar, x0 + w, y0 + h - bar, fill=colour, tags="message")
+            canvas.create_text(x0 + 10, y0 + h - bar / 2, text=t(key), fill=pal["text"], font=app.f_small,
+                               anchor="w", width=w - 20, tags="message")
         else:
             if self.state == "idle":
                 self.photo.paste(Image.new("RGB", self.size, pal["bezel"]))
                 self.has_frame = False
-            # empty state: a small glyph, one line, one muted hint, centred on the picture area
-            cx, cy = PAD + w // 2, PAD + h // 2
             hint = {"idle": "hint_idle", "connecting": "hint_connecting", "reconnecting": "hint_connecting",
                     "error": "hint_error", "paused": "hint_paused"}[self.state]
-            glyph = "pause" if self.state == "paused" else "screen"
-            top = cy - 34 if h >= 110 else cy - 26
-            draw_icon(canvas, glyph, cx - 11, top, 22, pal["muted"], width=1.6, tags="message")
-            canvas.create_text(cx, top + 36, text=t(key), fill=pal["text"], font=app.f_body, tags="message")
-            canvas.create_text(cx, top + 56, text=t(hint), fill=pal["muted"], font=app.f_small, tags="message")
-        canvas.tag_raise("mask")
+            cx, cy = x0 + w // 2, y0 + h // 2
+            if h >= 200:  # Main: glyph, one line, one muted hint
+                glyph = "pause" if self.state == "paused" else "screen"
+                draw_icon(canvas, glyph, cx - 11, cy - 34, 22, pal["muted"], width=1.6, tags="message")
+                canvas.create_text(cx, cy + 2, text=t(key), fill=pal["text"], font=app.f_body, tags="message")
+                canvas.create_text(cx, cy + 24, text=t(hint), fill=pal["muted"], font=app.f_small, width=w - 24,
+                                   justify="center", tags="message")
+            else:  # tray pictures are ~100 px tall: one centred line, wrapped inside the picture
+                canvas.create_text(cx, cy, text=t(key), fill=pal["muted"], font=app.f_small, width=w - 16,
+                                   justify="center", tags="message")
+        canvas.tag_raise("outline")
 
 
 class App:
@@ -160,11 +169,16 @@ class App:
         self.root.update_idletasks()
         self._built_req = (self.root.winfo_reqwidth(), self.root.winfo_reqheight(), self.k)
         req_w, req_h, k = self._built_req  # smallest drag size = this layout at MIN_SCALE
-        self.root.minsize(int(req_w - (k - MIN_SCALE) * (BASE["main"][0] + BASE["hud"][0])),
-                          int(req_h - (k - MIN_SCALE) * BASE["main"][1]))
+        per_w, per_h = self.scale_terms()
+        self.root.minsize(int(req_w - (k - MIN_SCALE) * per_w), int(req_h - (k - MIN_SCALE) * per_h))
         self._building = False
         if reopen:
             self.toggle_settings()
+
+    @staticmethod
+    def scale_terms():
+        """Window pixels added per unit of k: width = Main + two side columns, height = Main + tray pictures."""
+        return MAIN_BASE[0] * (1 + 2 * SIDE_RATIO), MAIN_BASE[1] * (1 + AUX_RATIO)
 
     # ---------- drag-to-resize ----------
     def on_configure(self, event):
@@ -179,15 +193,15 @@ class App:
         self._resize_job = self.root.after(250, self.fit_to_window)
 
     def fit_to_window(self):
-        """Pick the scale whose layout fits the window. Screen widths/heights grow linearly with the scale;
-        bars, chins and padding do not, so solve for k from the last layout and correct once if needed."""
+        """Pick the scale whose layout fits the window. Pictures grow linearly with the scale; bars, text and
+        padding do not, so solve for k from the last layout and correct once if needed."""
         self._resize_job = None
         width, height = self.root.winfo_width(), self.root.winfo_height()
+        per_w, per_h = self.scale_terms()
         for _ in range(3):
             req_w, req_h, k = self._built_req
-            fixed_w = req_w - k * (BASE["main"][0] + BASE["hud"][0])
-            fixed_h = req_h - k * BASE["main"][1]
-            new_k = min((width - fixed_w) / (BASE["main"][0] + BASE["hud"][0]), (height - fixed_h) / BASE["main"][1])
+            fixed_w, fixed_h = req_w - k * per_w, req_h - k * per_h
+            new_k = min((width - fixed_w) / per_w, (height - fixed_h) / per_h)
             new_k = round(max(MIN_SCALE, min(MAX_SCALE, new_k)), 3)
             if abs(new_k - k) < 0.01 and req_w <= width and req_h <= height:
                 return
@@ -212,11 +226,13 @@ class App:
         thai = pick_font(["Noto Sans Thai", "Leelawadee UI", "Sukhumvit Set", "Thonburi", "Tahoma"], "TkDefaultFont")
         mono = pick_font(["Noto Sans Mono", "DejaVu Sans Mono", "Consolas", "Menlo", "Courier New"], "TkFixedFont")
         self.f_body, self.f_bold = (thai, 10), (thai, 10, "bold")   # secondary text, buttons
-        self.f_small = (thai, 9)                                       # units, captions in rows, chin text
-        self.f_caption = (thai, 9, "bold")                             # card titles (muted)
-        self.f_title = (thai, 11, "bold")                              # status line, settings title
-        self.f_value = (thai, 20, "bold")                              # primary value on a card
-        self.f_num, self.f_num_bold = (mono, 9), (mono, 10, "bold")   # numbers: IP, rates, fps, meters
+        self.f_small = (thai, 9)                                       # units, captions, stream meta
+        self.f_tiny = (thai, 8)                                        # notes under blocks
+        self.f_caption = (thai, 9, "bold")                             # block titles
+        self.f_title = (thai, 11, "bold")                              # app name, settings title
+        self.f_stage = (thai, 15, "bold")                              # "จอกลาง" beside the stage
+        self.f_value = (mono, 19)                                      # primary car values
+        self.f_num, self.f_num_bold = (mono, 9), (mono, 10)            # numbers: IP, rates, fps, meters
         self.root.configure(bg=pal["bg"])
         self.root.option_add("*Font", self.f_body)
         self.root.title("Geely Car Viewer")
@@ -227,15 +243,8 @@ class App:
         self.root.resizable(True, True)
         self.root.attributes("-topmost", bool(self.s["topmost"]))
         self.build_topbar()
-        self.car_panel = None
-        if self.s["show_vehicle"]:
-            left, right = self.columns()
-            holder = tk.Frame(self.root, bg=self.pal["bg"], padx=PAGE)
-            holder.pack()
-            self.car_panel = CarPanel(self, holder, left, right)
-            self.car_panel.pack()
-            self.car_panel.update_data(**self.car_data)
         self.build_screens()
+        self.build_floor()
         self.update_conn_ui()
 
     def layout_model(self):
@@ -244,191 +253,314 @@ class App:
         return self.detected_model or "EX5"
 
     def sizes(self):
+        """Picture sizes (even numbers, true aspect) for the current scale; the streams scale to these."""
         k = self.k
-        return {name: (int(w * k) // 2 * 2, int(h * k) // 2 * 2) for name, (w, h) in BASE.items()}
+        main = (even(MAIN_BASE[0] * k), even(MAIN_BASE[1] * k))
+        aux_h = even(main[1] * AUX_RATIO)
+        return {"main": main,
+                "hud": (even(aux_h * ASPECT["hud"]), aux_h),
+                "cluster": (even(aux_h * ASPECT["cluster"]), aux_h)}
 
-    def columns(self):
-        """Widths of the two columns every row shares: main screen (left) and HUD/cluster (right)."""
-        sizes = self.sizes()
-        return sizes["main"][0] + 2 * PAD, sizes["hud"][0] + 2 * PAD
+    def page_width(self):
+        """Width of every row: the stage (side column | Main | side column)."""
+        return self.sizes()["main"][0] + 2 * INSET + 2 * self.side_width()
 
+    def side_width(self):
+        return int(self.sizes()["main"][0] * SIDE_RATIO)
+
+    # ---------- top bar ----------
     def build_topbar(self):
-        """Connection | network graph | PC + car meters | gear. The left two cards fill the main column,
-        the right two the HUD column, with GAP between every card (same grid as the car panel and screens)."""
+        """Brand + connection status on the left; link, address, connect and settings on the right."""
         pal, t = self.pal, self.t
-        left, right = self.columns()
-        bar = tk.Frame(self.root, bg=pal["bg"], padx=PAGE)
-        bar.pack(pady=(PAGE, GAP))
-        inner = tk.Frame(bar, bg=pal["bg"], width=left + GAP + right, height=TOP_H)
-        inner.pack()
-        inner.pack_propagate(False)
+        bar = tk.Frame(self.root, bg=pal["bg"], width=self.page_width(), height=TOP_H)
+        bar.pack(padx=PAGE, pady=(4, 4))
+        bar.pack_propagate(False)
 
-        # pack order matters: gear and meters first on the right, the graph takes what is left
-        self.gear = IconButton(inner, pal, pal["bg"], "gear", self.toggle_settings, GEAR)
-        self.gear.pack(side="right", fill="y", pady=(0, 0))
-        self.meters_box = None
-        if self.s["show_host"] or self.s["show_car"]:
-            box = Card(inner, pal, pal["bg"], right - GAP - GEAR, TOP_H)
-            box.pack(side="right", fill="y", padx=(0, GAP))
-            body = box.body
-            self.meters_box = {}
-            # the metric columns get a fixed width, so the PC row and the car row line up
-            label_w = 46
-            cell_w = (right - GAP - GEAR - 28 - label_w - 2 * 12) // 3
-            body.grid_columnconfigure(0, minsize=label_w)
-            for row, (key, show) in enumerate([("pc", self.s["show_host"]), ("car", self.s["show_car"])]):
-                if not show:
-                    continue
-                tk.Label(body, text=t(key), bg=pal["panel2"], fg=pal["muted"], font=self.f_small,
-                         anchor="w").grid(row=row, column=0, sticky="w", pady=(0, 8) if row == 0 else (0, 0))
-                cells = {}
-                for col, metric in enumerate(("CPU", "GPU", "RAM")):
-                    cells[metric] = MiniMeter(body, metric, pal, self.f_small, self.f_num, width=cell_w,
-                                              value_chars=7 if self.size_name == "small" else 10)
-                    cells[metric].grid(row=row, column=col + 1, padx=(0 if col == 0 else 12, 0),
-                                       pady=(0, 8) if row == 0 else (0, 0), sticky="w")
-                self.meters_box[key] = cells
-
-        conn_w = max(360, left // 2 + 8)  # wide enough for the Thai labels in one row
-        conn = Card(inner, pal, pal["bg"], conn_w, TOP_H)
-        conn.pack(side="left", fill="y", padx=(0, GAP))
-        top = tk.Frame(conn.body, bg=pal["panel2"], height=28)
-        top.pack(fill="x")
-        top.pack_propagate(False)
-        self.conn_dot = Dot(top, pal, pal["panel2"])
-        self.conn_dot.pack(side="left", padx=(0, 8))
-        self.conn_label = tk.Label(top, bg=pal["panel2"], fg=pal["text"], font=self.f_title)
-        self.conn_label.pack(side="left")
-        self.model_chip = Chip(top, "", self.f_small, bg=pal["panel2"], fill=pal["accent_soft"], fg=pal["accent"],
-                               padx=8, height=22)
-        self.model_chip.pack(side="left", padx=(10, 0))
-        self.model_chip.bind("<Button-1>", self.model_menu)
-        self.link_seg = Segmented(top, [("wifi", "Wi‑Fi"), ("usb", "USB")], self.s["link"], pal, self.set_link,
-                                  self.f_small, bg=pal["panel2"], fill=pal["bg"], height=24)
-        self.link_seg.pack(side="right")
-
-        row2 = tk.Frame(conn.body, bg=pal["panel2"], height=28)
-        row2.pack(fill="x", pady=(6, 0))
-        row2.pack_propagate(False)
+        # right side first: pack keeps their room and the status text gets clipped instead
+        self.gear = IconButton(bar, pal, pal["bg"], "sliders", self.toggle_settings, CTRL_H, text=t("settings"),
+                               font=self.f_small)
+        self.gear.pack(side="right", padx=(12, 0))
+        self.conn_button = Chip(bar, "", self.f_bold, bg=pal["bg"], fill=pal["accent"], fg=pal["accent_ink"],
+                                padx=18, height=CTRL_H)
+        self.conn_button.bind("<Button-1>", lambda _e: self.on_conn_button())
+        self.conn_button.pack(side="right", padx=(8, 0))
+        self.address_box = tk.Frame(bar, bg=pal["field"], highlightthickness=1, highlightbackground=pal["line"],
+                                    highlightcolor=pal["accent"], height=CTRL_H)
+        self.address_box.pack(side="right", padx=(8, 0), fill="y", pady=(TOP_H - CTRL_H) // 2)
+        self.ip_caption = tk.Label(self.address_box, text="IP", bg=pal["field"], fg=pal["muted"], font=self.f_tiny)
         self.ip_var = tk.StringVar(value=self.s["address"])
-        self.ip_entry = tk.Entry(row2, textvariable=self.ip_var, width=17, bg=pal["bg"], fg=pal["text"],
-                                 relief="flat", insertbackground=pal["accent"], font=self.f_num,
-                                 disabledbackground=pal["bg"], disabledforeground=pal["muted"],
+        entry_chars = 17 if self.size_name != "small" else 15
+        self.ip_entry = tk.Entry(self.address_box, textvariable=self.ip_var, width=entry_chars, bg=pal["field"],
+                                 fg=pal["text"], relief="flat", insertbackground=pal["accent"], font=self.f_num,
+                                 disabledbackground=pal["field"], disabledforeground=pal["muted"],
                                  highlightthickness=0, selectbackground=pal["accent_line"])
         self.ip_entry.bind("<Return>", lambda _e: self.on_conn_button())
         self.ip_var.trace_add("write", lambda *_: self.update_conn_ui())
-        self.usb_pick = tk.Label(row2, bg=pal["bg"], fg=pal["text"], font=self.f_small, width=24, anchor="w",
-                                 padx=8, cursor="hand2")
+        self.usb_pick = tk.Label(self.address_box, bg=pal["field"], fg=pal["text"], font=self.f_small,
+                                 width=entry_chars + 3, anchor="w", padx=8, cursor="hand2")
         self.usb_pick.bind("<Button-1>", self.usb_menu)
-        self.conn_button = Chip(row2, "", self.f_bold, bg=pal["panel2"], fill=pal["accent"], fg=pal["accent_ink"],
-                                padx=14, height=28)
-        self.conn_button.bind("<Button-1>", lambda _e: self.on_conn_button())
-        self.ping_label = tk.Label(row2, bg=pal["panel2"], fg=pal["muted"], font=self.f_small, anchor="w")
-        self.ping_label.pack(side="right")
+        self.link_seg = Segmented(bar, [("wifi", "Wi‑Fi"), ("usb", "USB")], self.s["link"], pal, self.set_link,
+                                  self.f_small, bg=pal["bg"], fill=pal["field"], height=CTRL_H)
+        self.link_seg.pack(side="right")
 
-        graph = Card(inner, pal, pal["bg"], 0, TOP_H)
-        graph.pack(side="left", fill="both", expand=True, padx=(0, GAP))
-        body = graph.body
-        now = tk.Frame(body, bg=pal["panel2"])
-        now.pack(side="left", fill="y", padx=(0, 10))
-        rate_chars = 12 if self.size_name != "small" else 11  # "↓ 999.9 Mb/s" fits; small window: the graph needs the room
-        self.down_label = tk.Label(now, bg=pal["panel2"], fg=pal["down"], font=self.f_num_bold, anchor="w",
-                                   width=rate_chars)
-        self.down_label.pack(anchor="w", expand=True)
-        self.up_label = tk.Label(now, bg=pal["panel2"], fg=pal["up"], font=self.f_num_bold, anchor="w",
-                                 width=rate_chars)
-        self.up_label.pack(anchor="w", expand=True)
-        right_part = tk.Frame(body, bg=pal["panel2"])
-        right_part.pack(side="left", fill="both", expand=True)
-        head = tk.Frame(right_part, bg=pal["panel2"])
-        head.pack(fill="x")
-        self.peak_label = tk.Label(head, bg=pal["panel2"], fg=pal["muted"], font=self.f_small)
-        if self.size_name != "small":  # small window: the graph gets the room instead
-            self.peak_label.pack(side="right")  # packed first: keeps its room when the box is narrow
-            tk.Label(head, text=t("history", s=self.s["graph_seconds"]), bg=pal["panel2"], fg=pal["muted"],
-                     font=self.f_small).pack(side="left")
-        self.graph = tk.Canvas(right_part, height=40, bg=pal["panel2"], highlightthickness=0)
-        self.graph.pack(fill="both", expand=True, pady=(4, 0))
-        self.draw_rates((0.0, 0.0))
+        brand = tk.Frame(bar, bg=pal["bg"])
+        brand.pack(side="left", fill="y")
+        mark = tk.Canvas(brand, width=30, height=30, bg=pal["bg"], highlightthickness=0)
+        mark.pack(side="left", padx=(0, 12))
+        round_rect(mark, 0.5, 0.5, 29.5, 29.5, 6, fill=pal["bg"], outline=pal["line"])
+        mark.create_text(12, 15, text="G", fill=pal["text"], font=self.f_title)
+        mark.create_text(20, 15, text="V", fill=pal["accent"], font=self.f_title)
+        words = tk.Frame(brand, bg=pal["bg"])
+        words.pack(side="left", pady=(4, 0))
+        tk.Label(words, text="Geely Car Viewer", bg=pal["bg"], fg=pal["text"], font=self.f_title,
+                 anchor="w").pack(anchor="w")
+        status = tk.Frame(words, bg=pal["bg"])
+        status.pack(anchor="w")
+        self.conn_dot = Dot(status, pal, pal["bg"], 6)
+        self.conn_dot.pack(side="left", padx=(1, 7))
+        self.conn_label = tk.Label(status, bg=pal["bg"], fg=pal["muted"], font=self.f_small, anchor="w")
+        self.conn_label.pack(side="left")
+        self.model_chip = Chip(status, "", self.f_tiny, bg=pal["bg"], fill=pal["accent_soft"], fg=pal["accent"],
+                               padx=7, height=17)
+        self.model_chip.pack(side="left", padx=(10, 0))
+        self.model_chip.bind("<Button-1>", self.model_menu)
 
+    # ---------- stage + tray ----------
     def build_screens(self):
         pal, t, sizes = self.pal, self.t, self.sizes()
-        body = tk.Frame(self.root, bg=pal["bg"], padx=PAGE)
-        body.pack(pady=(GAP, PAGE))
+        page_w, side = self.page_width(), self.side_width()
         model = self.layout_model()
         old = self.screens
         self.screens = {}
-        main = self.add_screen(body, "main", sizes["main"])
-        main.canvas.grid(row=0, column=0, sticky="n", padx=(0, GAP))
-        right = tk.Frame(body, bg=pal["bg"])
-        right.grid(row=0, column=1, sticky="n")
 
-        main.chin_label(t("main"), fg=pal["text"], font=self.f_bold, padx=(6, 8))
-        main.chin_label(f"{2560}×{1600}")
+        stage = tk.Frame(self.root, bg=pal["bg"])
+        stage.pack(padx=PAGE)
+        tk.Frame(stage, bg=pal["line"], width=page_w, height=1).pack()
+        row = tk.Frame(stage, bg=pal["bg"])
+        row.pack()
+        tk.Frame(stage, bg=pal["line"], width=page_w, height=1).pack()
+        main_h = sizes["main"][1] + 2 * INSET
+        left = tk.Frame(row, bg=pal["bg"], width=side, height=main_h)
+        left.grid(row=0, column=0)
+        left.pack_propagate(False)
+        main = self.add_screen(row, "main", sizes["main"], pal["bg"])
+        main.canvas.grid(row=0, column=1)
+        right = tk.Frame(row, bg=pal["bg"], width=side, height=main_h)
+        right.grid(row=0, column=2)
+        right.pack_propagate(False)
+
+        # left: what this is, and the one control that can touch the car
+        head = tk.Frame(left, bg=pal["bg"])
+        head.pack(side="top", anchor="w", padx=(6, 0), pady=(24, 0))
+        tk.Label(head, text=t("main"), bg=pal["bg"], fg=pal["text"], font=self.f_stage).pack(anchor="w")
+        tk.Label(head, text=t("main_sub"), bg=pal["bg"], fg=pal["muted"], font=self.f_small).pack(anchor="w")
+        tk.Label(head, text="2560 × 1600", bg=pal["bg"], fg=pal["muted"], font=self.f_tiny).pack(anchor="w",
+                                                                                                 pady=(10, 0))
+        control = tk.Frame(left, bg=pal["bg"])
+        control.pack(side="bottom", anchor="w", padx=(6, 0), pady=(0, 18))
+        tk.Label(control, text=t("control_main"), bg=pal["bg"], fg=pal["text"], font=self.f_small,
+                 wraplength=side - 12, justify="left").pack(anchor="w", pady=(0, 8))
         self.control_var = tk.BooleanVar(value=self.s["control"])
-        Switch(main.chin, self.control_var, pal, self.set_control, bg=pal["bezel"]).pack(side="right", padx=(6, 6))
-        tk.Label(main.chin, text=t("control"), bg=pal["bezel"], fg=pal["text"], font=self.f_small).pack(side="right")
-        self.add_chin_status(main)
+        Switch(control, self.control_var, pal, self.set_control, bg=pal["bg"]).pack(anchor="w")
         for event in ("<ButtonPress-1>", "<B1-Motion>", "<ButtonRelease-1>"):
             main.canvas.bind(event, self.on_touch)
+
+        # right: model + mode note on top, live stream numbers at the bottom
+        note = tk.Frame(right, bg=pal["bg"])
+        note.pack(side="top", anchor="e", padx=(0, 6), pady=(24, 0))
+        self.stage_mode = tk.Label(note, bg=pal["bg"], fg=pal["text"], font=self.f_small, anchor="e",
+                                   justify="right", wraplength=side - 12)
+        self.stage_mode.pack(anchor="e")
+        self.stage_hint = tk.Label(note, bg=pal["bg"], fg=pal["muted"], font=self.f_small, anchor="e",
+                                   justify="right", wraplength=side - 12)
+        self.stage_hint.pack(anchor="e", pady=(4, 0))
+        tk.Label(note, text=t("main_only"), bg=pal["bg"], fg=pal["muted"], font=self.f_small, anchor="e",
+                 justify="right", wraplength=side - 12).pack(anchor="e", pady=(4, 0))
+        meta = tk.Frame(right, bg=pal["bg"])
+        meta.pack(side="bottom", anchor="e", padx=(0, 6), pady=(0, 18))
+        self.add_stream_status(main, meta, pal["bg"], stacked=True)
         self.apply_control_look()
 
+        # tray: HUD card, Cluster card, car data
+        tray = tk.Frame(self.root, bg=pal["bg"], width=page_w)
+        tray.pack(padx=PAGE, pady=(ROW_GAP, 0))
+        card_h = AUX_PAD + AUX_HEAD + sizes["hud"][1] + 2 * INSET + AUX_FOOT
+        used = 0
         if model == "EX5":
-            hud = self.add_screen(right, "hud", sizes["hud"])
-            hud.canvas.pack()
-            hud.chin_label(t("hud"), fg=pal["text"], font=self.f_bold, padx=(6, 8))
-            hud.chin_label(t("rotated") if self.s["rotate_hud"] else "")
-            hud.chin_label(t("view_only"), side="right", padx=(0, 8))
-            self.add_chin_status(hud)
-            cluster = self.add_screen(right, "cluster", sizes["cluster"])
-            cluster.canvas.pack(pady=(GAP, 0))
-            cluster.chin_label(t("cluster"), fg=pal["text"], font=self.f_bold, padx=(6, 8))
-            cluster.ago = cluster.chin_label("")
-            self.refresh_var = tk.BooleanVar(value=self.s["cluster_refresh"])
-            Switch(cluster.chin, self.refresh_var, pal, self.set_cluster_refresh, bg=pal["bezel"]).pack(side="right", padx=(6, 6))
+            hud, foot = self.aux_card(tray, "hud", sizes["hud"], t("hud"), "HUD", "800 × 480", card_h)
+            hud.card.grid(row=0, column=0, sticky="n", padx=(0, GAP))
+            rotated = f" · {t('rotated')}" if self.s["rotate_hud"] and self.size_name != "small" else ""
+            tk.Label(foot, text=t("view_only") + rotated,
+                     bg=pal["bezel"], fg=pal["muted"], font=self.f_tiny).pack(side="left")
+            self.add_stream_status(hud, foot, pal["bezel"])
+            cluster, foot = self.aux_card(tray, "cluster", sizes["cluster"], t("cluster"), "Cluster", "1920 × 532",
+                                          card_h)
+            cluster.card.grid(row=0, column=1, sticky="n", padx=(0, GAP))
             interval = self.s["cluster_interval"]
-            tk.Label(cluster.chin, text=t("refresh", s=f"{interval:g}"), bg=pal["bezel"], fg=pal["text"],
-                     font=self.f_small).pack(side="right")
-            self.add_chin_status(cluster, fps=False)
+            tk.Label(foot, text=t("refresh", s=f"{interval:g}"), bg=pal["bezel"], fg=pal["text"],
+                     font=self.f_tiny).pack(side="left")
+            self.refresh_var = tk.BooleanVar(value=self.s["cluster_refresh"])
+            Switch(foot, self.refresh_var, pal, self.set_cluster_refresh, bg=pal["bezel"]).pack(side="left",
+                                                                                               padx=(8, 0))
+            self.add_stream_status(cluster, foot, pal["bezel"], fps=False)
+            cluster.ago = tk.Label(foot, bg=pal["bezel"], fg=pal["muted"], font=self.f_tiny)
+            cluster.ago.pack(side="right", padx=(0, 8))
+            used = int(hud.card["width"]) + int(cluster.card["width"]) + 2 * GAP
         else:  # EX2: no HUD; cluster path unknown
-            w, h = sizes["hud"][0], sizes["hud"][1] + sizes["cluster"][1] + GAP + 60
-            box = tk.Canvas(right, width=w + 2 * PAD, height=h + PAD + CHIN, bg=pal["bg"], highlightthickness=0)
-            box.pack()
-            round_rect(box, 1, 1, w + 2 * PAD - 1, h + PAD + CHIN - 1, RADIUS, fill=pal["bezel"], outline=pal["bezel_line"])
-            box.create_rectangle(PAD, PAD, PAD + w, PAD + h, outline=pal["line"], dash=(3, 3))
-            draw_icon(box, "screen", PAD + w // 2 - 11, PAD + h // 2 - 40, 22, pal["muted"], width=1.6)
-            box.create_text(PAD + w // 2, PAD + h // 2 + 0, text=t("ex2_cluster_title"), fill=pal["text"], font=self.f_body)
-            box.create_text(PAD + w // 2, PAD + h // 2 + 22, text=t("ex2_cluster_body"), fill=pal["muted"],
-                            font=self.f_small, justify="center")
-            box.create_text(PAD + 8, PAD + h + CHIN // 2, text=f"{t('cluster')} · {t('st_unsupported')}",
-                            fill=pal["muted"], font=self.f_small, anchor="w")
-            tk.Label(right, text=t("ex2_note"), bg=pal["bg"], fg=pal["muted"], font=self.f_small,
-                     wraplength=w + 2 * PAD, justify="left").pack(anchor="w", pady=(10, 0))
+            width = sizes["hud"][0] + sizes["cluster"][0] + 4 * INSET + 4 * AUX_PAD + GAP
+            box = tk.Canvas(tray, width=width, height=card_h, bg=pal["bg"], highlightthickness=0)
+            box.grid(row=0, column=0, columnspan=2, sticky="n", padx=(0, GAP))
+            round_rect(box, 0.5, 0.5, width - 0.5, card_h - 0.5, RADIUS, fill=pal["bezel"], outline=pal["line"])
+            box.create_text(AUX_PAD + 2, AUX_PAD + AUX_HEAD / 2, text=f"{t('cluster')} · {t('st_unsupported')}",
+                            fill=pal["text"], font=self.f_caption, anchor="w")
+            box.create_text(width / 2, card_h / 2, text=t("ex2_cluster_title"), fill=pal["text"], font=self.f_small)
+            box.create_text(width / 2, card_h / 2 + 30, text=t("ex2_cluster_body") + "\n" + t("ex2_note"),
+                            fill=pal["muted"], font=self.f_tiny, justify="center", width=width - 24)
+            used = width + GAP
+        self.car_panel = None
+        vehicle_w = page_w - used
+        if self.s["show_vehicle"] and vehicle_w > 200:
+            self.car_panel = CarPanel(self, tray, vehicle_w, card_h)
+            self.car_panel.grid(row=0, column=2, sticky="n")
+            self.car_panel.update_data(**self.car_data)
+        else:
+            tk.Frame(tray, bg=pal["bg"], width=max(1, vehicle_w), height=card_h).grid(row=0, column=2)
         # keep states across rebuilds (language/theme/size changes while streaming)
         for name, screen in self.screens.items():
             if name in old:
                 screen.state = old[name].state
             self.paint_state(screen)
 
-    def add_screen(self, parent, name, size):
-        screen = Screen(self, parent, name, size)
+    def aux_card(self, parent, name, size, title, sub, res, card_h):
+        """Rounded card: title row, picture, footer. Returns (screen, footer frame)."""
+        pal = self.pal
+        width = size[0] + 2 * INSET + 2 * AUX_PAD
+        card = tk.Canvas(parent, width=width, height=card_h, bg=pal["bg"], highlightthickness=0)
+        round_rect(card, 0.5, 0.5, width - 0.5, card_h - 0.5, RADIUS, fill=pal["bezel"], outline=pal["line"])
+        head_y = AUX_PAD + AUX_HEAD / 2
+        title_item = card.create_text(AUX_PAD + 2, head_y, text=title, fill=pal["text"], font=self.f_caption,
+                                      anchor="w")
+        if sub != title:
+            card.create_text(card.bbox(title_item)[2] + 6, head_y, text=sub, fill=pal["muted"], font=self.f_tiny,
+                             anchor="w")
+        card.create_text(width - AUX_PAD - 2, head_y, text=res, fill=pal["muted"], font=self.f_tiny, anchor="e")
+        screen = self.add_screen(card, name, size, pal["bezel"])
+        card.create_window(AUX_PAD, AUX_PAD + AUX_HEAD, window=screen.canvas, anchor="nw")
+        foot = tk.Frame(card, bg=pal["bezel"], width=size[0], height=AUX_FOOT - 4)
+        foot.pack_propagate(False)
+        card.create_window(AUX_PAD + INSET, AUX_PAD + AUX_HEAD + size[1] + 2 * INSET + 1, window=foot, anchor="nw",
+                           width=size[0], height=AUX_FOOT - 4)
+        screen.card = card
+        return screen, foot
+
+    def add_screen(self, parent, name, size, bg):
+        screen = Screen(self, parent, name, size, bg)
         self.screens[name] = screen
         return screen
 
-    def add_chin_status(self, screen, fps=True):
-        """Right side of a chin: switch/bandwidth | fps | state. One separator before the numbers."""
+    def add_stream_status(self, screen, parent, bg, fps=True, stacked=False):
+        """Dot + state, fps, bandwidth. stacked: Main's side column (state on its own line, numbers below)."""
         pal = self.pal
-        tk.Frame(screen.chin, bg=pal["line"], width=1, height=20).pack(side="right", padx=(0, 12))
-        screen.bw_label = tk.Label(screen.chin, bg=pal["bezel"], fg=pal["down"], font=self.f_num, width=7, anchor="e")
+        font = self.f_small if stacked else self.f_tiny
+        top = tk.Frame(parent, bg=bg)
+        top.pack(side="top" if stacked else "right", anchor="e")
+        if stacked:
+            nums = tk.Frame(parent, bg=bg)
+            nums.pack(side="top", anchor="e", pady=(4, 0))
+        else:
+            nums = top
+        screen.bw_label = tk.Label(nums, bg=bg, fg=pal["down"], font=self.f_num if stacked else self.f_tiny,
+                                   anchor="e")
         screen.bw_label.pack(side="right")
-        screen.fps_label = tk.Label(screen.chin, bg=pal["bezel"], fg=pal["muted"], font=self.f_num,
-                                    width=7 if fps else 0, anchor="e")
+        screen.fps_label = tk.Label(nums, bg=bg, fg=pal["muted"], font=self.f_num if stacked else self.f_tiny,
+                                    anchor="e")
         if fps:  # the cluster sends one picture every few seconds: fps would only mislead
-            screen.fps_label.pack(side="right")
-        screen.state_label = tk.Label(screen.chin, bg=pal["bezel"], fg=pal["text"], font=self.f_small)
-        screen.state_label.pack(side="right", padx=(0, 6))
-        screen.state_dot = Dot(screen.chin, pal, pal["bezel"], 7)
-        screen.state_dot.pack(side="right", padx=(0, 6))
+            screen.fps_label.pack(side="right", padx=(0, 8))
+        screen.state_label = tk.Label(top, bg=bg, fg=pal["text"], font=font)
+        if stacked:
+            screen.state_label.pack(side="right")
+            screen.state_dot = Dot(top, pal, bg, 6)
+            screen.state_dot.pack(side="right", padx=(0, 7))
+        else:
+            screen.state_label.pack(side="right", padx=(0, 8))
+            screen.state_dot = Dot(top, pal, bg, 6)
+            screen.state_dot.pack(side="right", padx=(0, 6))
+
+    # ---------- system floor ----------
+    def build_floor(self):
+        """Resources (this PC and the head unit) | this app's network traffic, as one quiet bottom strip."""
+        pal, t = self.pal, self.t
+        page_w = self.page_width()
+        floor = self.floor = tk.Frame(self.root, bg=pal["bg"], width=page_w, height=FLOOR_H + 1)
+        floor.pack(padx=PAGE, pady=(ROW_GAP, 6))
+        floor.pack_propagate(False)
+        floor.grid_propagate(False)
+        tk.Frame(floor, bg=pal["line"], height=1).place(x=0, y=0, relwidth=1)
+        show_meters = self.s["show_host"] or self.s["show_car"]
+        res_w = int(page_w * 0.47) if show_meters else 0
+        net_x = res_w + 32 if show_meters else 0
+        self.meters_box = None
+        if show_meters:
+            res = tk.Frame(floor, bg=pal["bg"], width=res_w, height=FLOOR_H - 8)
+            res.place(x=0, y=10)
+            res.grid_propagate(False)
+            res.grid_columnconfigure(0, minsize=TITLE_W)
+            tk.Label(res, text=t("resources"), bg=pal["bg"], fg=pal["text"], font=self.f_caption,
+                     anchor="w").grid(row=0, column=0, rowspan=1, sticky="nw")
+            tk.Label(res, text=t("gpu_note"), bg=pal["bg"], fg=pal["muted"], font=self.f_tiny, anchor="w",
+                     wraplength=TITLE_W - 8, justify="left").grid(row=1, column=0, rowspan=2, sticky="nw")
+            label_w = 44
+            res.grid_columnconfigure(1, minsize=label_w)
+            cell_w = (res_w - TITLE_W - label_w - 3 * 14) // 3
+            chars = max(7, min(11, cell_w // max(1, measure(self.f_num, "0"))))  # "21.5/31G", "44% 300M"
+            for col, metric in enumerate(("CPU", "GPU", "RAM")):
+                tk.Label(res, text=metric, bg=pal["bg"], fg=pal["muted"], font=self.f_tiny, anchor="w", pady=0, bd=0).grid(
+                    row=0, column=col + 2, sticky="w", padx=(14, 0))
+            self.meters_box = {}
+            row = 1
+            for key, show in (("pc", self.s["show_host"]), ("car", self.s["show_car"])):
+                if not show:
+                    continue
+                tk.Label(res, text=t(key), bg=pal["bg"], fg=pal["muted"], font=self.f_small, anchor="w", pady=0, bd=0).grid(
+                    row=row, column=1, sticky="w")
+                cells = {}
+                for col, metric in enumerate(("CPU", "GPU", "RAM")):
+                    cells[metric] = MiniMeter(res, None, pal, self.f_small, self.f_num, width=cell_w,
+                                              value_chars=chars, bg=pal["bg"])
+                    cells[metric].grid(row=row, column=col + 2, padx=(14, 0), pady=(1, 1), sticky="w")
+                self.meters_box[key] = cells
+                row += 1
+
+        net_w = page_w - net_x
+        net = tk.Frame(floor, bg=pal["bg"], width=net_w, height=FLOOR_H - 8)
+        net.place(x=net_x, y=10)
+        net.pack_propagate(False)
+        titles = tk.Frame(net, bg=pal["bg"], width=TITLE_W)
+        titles.pack(side="left", fill="y")
+        titles.pack_propagate(False)
+        tk.Label(titles, text=t("app_network"), bg=pal["bg"], fg=pal["text"], font=self.f_caption,
+                 anchor="w").pack(anchor="w")
+        tk.Label(titles, text=t("history", s=self.s["graph_seconds"]), bg=pal["bg"], fg=pal["muted"],
+                 font=self.f_tiny, anchor="w").pack(anchor="w")
+        tk.Label(titles, text=t("net_note"), bg=pal["bg"], fg=pal["muted"], font=self.f_tiny, anchor="w",
+                 wraplength=TITLE_W - 8, justify="left").pack(anchor="w", side="bottom")
+        now = tk.Frame(net, bg=pal["bg"])
+        now.pack(side="left", fill="y", padx=(0, 16))
+        rate_chars = 12 if self.size_name != "small" else 11  # "↓ 999.9 Mb/s" fits
+        self.down_label = tk.Label(now, bg=pal["bg"], fg=pal["down"], font=self.f_num_bold, anchor="w",
+                                   width=rate_chars)
+        self.down_label.pack(anchor="w")
+        self.up_label = tk.Label(now, bg=pal["bg"], fg=pal["up"], font=self.f_num, anchor="w", width=rate_chars)
+        self.up_label.pack(anchor="w")
+        self.ping_label = tk.Label(now, bg=pal["bg"], fg=pal["muted"], font=self.f_tiny, anchor="w")
+        self.ping_label.pack(anchor="w")
+        plot = tk.Frame(net, bg=pal["bg"])
+        plot.pack(side="left", fill="both", expand=True)
+        self.peak_label = tk.Label(plot, bg=pal["bg"], fg=pal["muted"], font=self.f_tiny, anchor="e")
+        self.peak_label.pack(fill="x")
+        self.graph = tk.Canvas(plot, height=36, bg=pal["bg"], highlightthickness=0)
+        self.graph.pack(fill="both", expand=True, pady=(0, 6))
+        self.draw_rates((0.0, 0.0))
 
     # ---------- state painting ----------
     def paint_state(self, screen):
@@ -457,11 +589,13 @@ class App:
         if not hasattr(self, "conn_button"):
             return
         usb = self.s["link"] == "usb"
-        self.ip_entry.pack_forget()
-        self.usb_pick.pack_forget()
-        self.conn_button.pack_forget()
-        (self.usb_pick if usb else self.ip_entry).pack(side="left", fill="y", ipady=4, padx=(0, 8))
-        self.conn_button.pack(side="left", fill="y")
+        showing = self.usb_pick if usb else self.ip_entry
+        if not showing.winfo_manager():  # swap the field only when the link changes (this runs every second)
+            for widget in (self.ip_caption, self.ip_entry, self.usb_pick):
+                widget.pack_forget()
+            if not usb:
+                self.ip_caption.pack(side="left", padx=(10, 6))
+            showing.pack(side="left", fill="y", padx=(0, 10))
         self.ip_entry.configure(state="disabled" if self.conn == "connecting" else "normal")
         if usb:
             label = next((f"{m or 'USB'}  {s}" for s, m in self.usb_list if s == self.s["usb_serial"]), None)
@@ -480,7 +614,7 @@ class App:
         if self.conn == "connected" and not self.car_ok:
             status = "conn_lost"
         if not getattr(self, "conn_error", None) or self.conn != "idle":
-            self.conn_label.configure(text=t(status), fg=pal["text"])
+            self.conn_label.configure(text=t(status), fg=pal["text"] if self.conn == "connected" else pal["muted"])
         colour = {"idle": pal["off_dot"], "connecting": pal["warn"],
                   "connected": pal["live"] if self.car_ok else pal["warn"]}[self.conn]
         self.conn_dot.set(colour)
@@ -490,6 +624,18 @@ class App:
             self.ping_label.configure(text=f"ping {self.ping:.0f} ms" if self.ping is not None else "ping –")
         else:
             self.ping_label.configure(text="")
+        self.update_stage_note()
+
+    def update_stage_note(self):
+        """Right of Main: which car and whether clicks reach it."""
+        if not hasattr(self, "stage_mode"):
+            return
+        t = self.t
+        model = self.model if self.conn == "connected" else self.layout_model()
+        on = self.control_var.get()
+        self.stage_mode.configure(text=f"{model} · {t('mode_control') if on else t('mode_view')}",
+                                  fg=self.pal["accent"] if on else self.pal["text"])
+        self.stage_hint.configure(text=t("hint_control_on") if on else t("hint_control_off"))
 
     def update_car_data(self, car):
         data = {"tcam": car.get("tcam"), "gps": car.get("gps")}
@@ -522,8 +668,9 @@ class App:
         main = self.screens.get("main")
         if main:
             on = self.control_var.get()
-            main.set_outline(self.pal["accent"] if on else self.pal["bezel_line"], 2 if on else 1)
+            main.set_outline(self.pal["accent"] if on else main.bg, 2)
             main.canvas.configure(cursor="hand2" if on else "")
+        self.update_stage_note()
 
     # ---------- connection ----------
     def can_auto_connect(self):
@@ -678,7 +825,7 @@ class App:
         if not (main and stream and self.control_var.get()):
             return
         w, h = main.size
-        fx, fy = (event.x - PAD) / w, (event.y - PAD) / h
+        fx, fy = (event.x - main.inset) / w, (event.y - main.inset) / h
         if event.type == tk.EventType.ButtonPress:
             if not (0 <= fx <= 1 and 0 <= fy <= 1):
                 return
@@ -842,9 +989,9 @@ class App:
         self.peak_label.configure(text=f"{self.t('peak')} {self.history.peak():.1f} Mb/s")
         graph = self.graph
         graph.delete("all")
-        width, height = max(graph.winfo_width(), 50), max(graph.winfo_height(), 30)
+        width, height = max(graph.winfo_width(), 50), max(graph.winfo_height(), 24)
         graph.create_line(0, height - 1, width, height - 1, fill=pal["line"])
-        graph.create_line(0, height // 2, width, height // 2, fill=pal["line"], dash=(2, 4))
+        graph.create_line(0, 1, width, 1, fill=pal["line"])
         samples, slots = list(self.history.samples), self.history.samples.maxlen
         if len(samples) < 2:
             return
