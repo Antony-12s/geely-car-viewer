@@ -1,6 +1,7 @@
 import io
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -133,12 +134,12 @@ class FakeCluster(paramiko.ServerInterface):
         return True
 
 
-def fake_cluster_server():
+def fake_cluster_server(server=None):
     """Listening port + a relay command that plays the role of `adb shell ... nc` (stdin/stdout <-> TCP)."""
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
-    server = FakeCluster()
+    server = server or FakeCluster()
 
     def serve():
         conn, _ = listener.accept()
@@ -454,3 +455,223 @@ def test_temporary_adb_verifier_restores_after_install_failure(monkeypatch, orig
             raise RuntimeError("install failed")
     assert value == original
     assert changes == ([] if original == "0" else ["0", original])
+
+
+# ---------- stability (audit F1, F2, F5, F6) ----------
+def jpeg(color, size=(16, 8)):
+    from PIL import Image
+    buffer = io.BytesIO()
+    Image.new("RGB", size, color).save(buffer, "JPEG")
+    return buffer.getvalue()
+
+
+class FakeJpegCluster(FakeCluster):
+    """Cluster with ffmpeg: small JPEGs 0.3 s apart, and the channel stays open like a live capture loop."""
+
+    def check_channel_exec_request(self, channel, command):
+        command = command.decode()
+        self.commands.append(command)
+
+        def answer():
+            time.sleep(0.2)
+            if "get surfaces" in command:
+                channel.sendall(b"- Surface 4711 (0x1267)\n")
+            elif command.startswith("command -v"):
+                channel.sendall(b"/usr/bin/ffmpeg\n")
+            else:
+                for color in ("red", "green", "blue"):
+                    channel.sendall(jpeg(color))
+                    time.sleep(0.3)
+                time.sleep(30)  # still capturing: no EOF to flush a short read
+            channel.send_exit_status(0)
+            channel.close()
+
+        threading.Thread(target=answer, daemon=True).start()
+        return True
+
+
+def test_cluster_jpeg_frames_arrive_without_waiting_for_64k():
+    """F1: the JPEG reader must not block until 64 KiB arrive (3 frames of ~700 B never fill it)."""
+    server, relay = fake_cluster_server(FakeJpegCluster())
+    arrived, done = [], threading.Event()
+
+    def on_frame(name, image):
+        arrived.append((time.monotonic(), image))
+        if len(arrived) == 3:
+            done.set()
+
+    stream = cluster.ClusterStream("serial", 1.0, lambda: (16, 8), on_frame, lambda n, s: None, stats.Meter(),
+                                   reconnect=False, proxy_args=relay)
+    stream.start()
+    try:
+        assert done.wait(15), f"frames={len(arrived)} commands={server.commands}"
+        assert arrived[2][0] - arrived[0][0] < 2.0
+        assert arrived[0][1].getpixel((0, 0))[0] > 200 and arrived[2][1].getpixel((0, 0))[2] > 200
+    finally:
+        stream.stop()
+        stream.join(10)
+    assert not stream.is_alive()
+
+
+def test_video_stream_stop_does_not_block_and_thread_cleans_up(tmp_path, monkeypatch):
+    """F2: stop() runs on the Tk thread: no wait, no adb. The stream thread kills/reaps and removes the forward."""
+    # Stub adb.run (no shell script, no real adb): runs on Windows, macOS and Linux alike.
+    callers = []
+
+    def run(*args, **kwargs):
+        callers.append((threading.current_thread().name, args))
+        if "--remove" in args:
+            time.sleep(1)  # a slow adb server: must only ever delay the stream thread
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(adb, "run", run)
+    stream = scrcpy.VideoStream("main", "serial", 0, lambda: (8, 8), lambda *a: None, lambda *a: None,
+                                stats.Meter(), reconnect=False)
+    ready = threading.Event()
+    server = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+
+    def session():
+        stream._forward = 4321
+        stream._procs.append(server)
+        a, b = socket.socketpair()
+        a.settimeout(1)
+        stream._socks.append(a)
+        ready.set()
+        scrcpy.recv_exact(a, 1, stream.stop_event)
+
+    stream._session = session
+    stream.start()
+    assert ready.wait(5)
+    started = time.monotonic()
+    stream.stop()
+    assert time.monotonic() - started < 0.2
+    assert callers == []  # no adb from the caller's thread
+    stream.join(10)
+    assert not stream.is_alive()
+    assert server.poll() is not None  # killed and reaped
+    assert [(name, args[2:]) for name, args in callers] == [("video-main", ("forward", "--remove", "tcp:4321"))]
+
+
+def test_pipe_socket_close_does_not_wait(monkeypatch):
+    """F2: ClusterStream.stop() closes the PipeSocket on the Tk thread; the wait belongs to reap()."""
+    sock = cluster.PipeSocket([sys.executable, "-c", "import time; time.sleep(30)"])
+    real_wait = sock.proc.wait
+    monkeypatch.setattr(sock.proc, "wait", lambda timeout=None: (time.sleep(2), real_wait(timeout))[1])
+    started = time.monotonic()
+    sock.close()
+    assert time.monotonic() - started < 0.2 and sock._closed
+    sock.reap()
+    assert sock.proc.poll() is not None
+
+
+@pytest.mark.parametrize("stop_during", ["push", "forward"])
+def test_video_stream_stopped_during_setup_starts_no_server(monkeypatch, stop_during):
+    """F5: a stop that lands while push/forward runs must not go on to start a server for a dead session."""
+    calls = []
+    stream = scrcpy.VideoStream("main", "serial", 0, lambda: (8, 8), lambda *a: None, lambda *a: None,
+                                stats.Meter(), reconnect=False)
+
+    def run(*args, **kwargs):
+        calls.append(args)
+        if stop_during in args and "--remove" not in args:
+            stream.stop()
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    started = []
+
+    def popen(*args, **kwargs):  # run() swallows exceptions: record, then fail the session
+        started.append(args)
+        raise OSError("no server in tests")
+
+    monkeypatch.setattr(adb, "run", run)
+    monkeypatch.setattr(adb, "popen", popen)
+    monkeypatch.setattr(scrcpy.paths, "find_server", lambda: "scrcpy-server")
+    stream.start()
+    stream.join(5)
+    assert not stream.is_alive()
+    assert started == []
+    verbs = [args[2] for args in calls]
+    if stop_during == "push":
+        assert verbs == ["push"]
+    else:  # the forward it made is removed again
+        assert verbs == ["push", "forward", "forward"] and "--remove" in calls[-1]
+
+
+def test_touch_never_blocks_and_keeps_down_up(monkeypatch):
+    """F6: touch() only queues; a sender thread does the sendall. Full queue drops MOVE, never DOWN/UP."""
+    a, b = socket.socketpair()
+    a.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+    a.setblocking(False)
+    for _ in range(4096):  # b never reads: fill the send buffer so the sender is stuck from the start
+        try:
+            a.send(b"\0" * 4096)
+        except BlockingIOError:
+            break
+    a.settimeout(1.0)  # what VideoStream._open sets
+    stream = scrcpy.VideoStream("main", "serial", 0, lambda: (8, 8), lambda *a: None, lambda *a: None,
+                                stats.Meter(), control=True)
+    stream._control_sock, stream.video_size = a, (1080, 1920)
+    stream._start_sender(a)
+    started = time.monotonic()
+    stream.touch(scrcpy.TOUCH_DOWN, 0.5, 0.5)
+    for i in range(98):
+        stream.touch(scrcpy.TOUCH_MOVE, i / 100, 0.5)
+    stream.touch(scrcpy.TOUCH_UP, 0.9, 0.5)
+    assert time.monotonic() - started < 0.05
+    pending = [message[1] for message in list(stream._touches.queue)]
+    assert pending[-1] == scrcpy.TOUCH_UP
+    assert pending.count(scrcpy.TOUCH_MOVE) <= scrcpy.TOUCH_QUEUE
+    stream.stop()
+    a.close(), b.close()
+
+    # healthy link: everything goes out, in order
+    a, b = socket.socketpair()
+    b.settimeout(2)
+    stream = scrcpy.VideoStream("main", "serial", 0, lambda: (8, 8), lambda *a: None, lambda *a: None,
+                                stats.Meter(), control=True)
+    stream._control_sock, stream.video_size = a, (1080, 1920)
+    stream._start_sender(a)
+    for action in (scrcpy.TOUCH_DOWN, scrcpy.TOUCH_MOVE, scrcpy.TOUCH_UP):
+        stream.touch(action, 0.5, 0.5)
+    got = scrcpy.recv_exact(b, 96, threading.Event())
+    assert [got[i * 32 + 1] for i in range(3)] == [scrcpy.TOUCH_DOWN, scrcpy.TOUCH_MOVE, scrcpy.TOUCH_UP]
+    stream.stop()
+    a.close(), b.close()
+
+
+# ---------- Cluster relay: firmware 1.3 (no su) first, the su relay as the fallback ----------
+def test_cluster_relay_is_unprivileged_first_with_su_fallback():
+    stream = cluster.ClusterStream("serial", 1.0, lambda: (96, 26), None, None, stats.Meter())
+    assert "su" not in stream.proxy_args and stream.proxy_args[-2:] == [cluster.CLUSTER_IP, "22"]
+    assert stream.proxy_args[1:5] == ["-s", "serial", "shell", "-T"]
+    at = stream.legacy_proxy_args.index("su")
+    assert stream.legacy_proxy_args[at:at + 2] == ["su", "0"]
+    assert [arg for arg in stream.legacy_proxy_args if arg not in ("su", "0")] == stream.proxy_args
+    custom = cluster.ClusterStream("serial", 1.0, lambda: (96, 26), None, None, stats.Meter(), proxy_args=["relay"])
+    assert custom.proxy_args == ["relay"] and custom.legacy_proxy_args is None  # an explicit relay has no fallback
+
+
+def test_cluster_falls_back_to_the_legacy_relay_and_still_stops_fast():
+    """The first relay dies during the SSH handshake (what a head unit without that path does): the stream
+    retries once through the legacy relay, shows frames, and stop() still returns at once (F2)."""
+    server, relay = fake_cluster_server()
+    frames, states = [], []
+    done = threading.Event()
+
+    def on_frame(name, image):
+        frames.append(image)
+        if len(frames) == 3:
+            done.set()
+
+    stream = cluster.ClusterStream("serial", 1.0, lambda: (96, 26), on_frame, lambda n, s: states.append(s),
+                                   stats.Meter(), reconnect=False)
+    stream.proxy_args = [sys.executable, "-c", "pass"]  # exits at once: no SSH banner
+    stream.legacy_proxy_args = relay
+    stream.start()
+    assert done.wait(30), f"frames={len(frames)} states={states}"
+    started = time.monotonic()
+    stream.stop()
+    assert time.monotonic() - started < 1.0
+    stream.join(10)
+    assert not stream.is_alive()
+    assert states[:2] == ["connecting", "live"] and "dump surface 4711" in server.commands[2]

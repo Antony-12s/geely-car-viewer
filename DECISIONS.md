@@ -47,3 +47,19 @@
 - Add an opt-in Linux safe rendering mode after another i915 engine reset failure with host GPU polling already disabled. Limit app-side rendering load without changing kernel or compositor settings.
 
 - Default to safe rendering on Linux in 1.1.3 so every Linux entry point gets the mitigation, including unpacked downloads and existing launchers.
+
+- **OLED Cinema layout (1.2.0, option A of the mockups):** true-black page; Main is the dominant picture in a centred stage with side columns (title + Control Main | stream details); HUD, Cluster and the car card share one tray underneath; PC/car resources and app-only network sit in a low system floor. Picked over the alternatives because Main is what the user watches; the others are glanceable. Resize, size presets, `scale` and every setting keep their 1.1.x meaning, so existing config carries over.
+- **Stream workers own their cleanup:** `stop()` (called on the Tk thread) only sets the stop flag, closes sockets and kills processes; the stream thread reaps them and runs `adb forward --remove`. A slow adb or Wi-Fi link can no longer freeze the window. `quit()` joins each stream for at most 0.5 s so forwards are removed best-effort.
+- **Stream ownership:** frame and state callbacks reach the UI only while their stream object is still the current one for that screen (`self.streams.get(name) is stream`), and a VideoStream checks the stop flag after push and after forward before starting a server, so a stopped session never repaints or starts a server against the next one.
+- **Touch queue:** `touch()` only enqueues; one sender thread per stream does `sendall`. When the small queue is full MOVE events are dropped, DOWN/UP never, so a congested link cannot block the Tk thread and a tap is never lost.
+- **UI pump logging:** `refresh` and `tick` reschedule first and catch any exception per task/frame with `log.exception`; a windowed Windows build has no stderr, so the log file is the only place an error can show.
+- **Cluster JPEG reads use `Channel.recv`:** paramiko's file `read(n)` waits for n bytes, which held small JPEG frames back until 64 KiB had arrived.
+- **1.2.0 merges two lines of work:** the 1.1.2/1.1.3 features (APK tab, HUD source ratio, unprivileged Cluster relay, Linux safe rendering, no host GPU polling on Linux) are kept as they were; the Telemetry window layout that carried them is replaced by OLED Cinema. Where the two disagreed, the layout follows OLED Cinema and the behaviour follows 1.1.3:
+  - APK is a top-bar tab; its workspace is placed over the stage + tray (`screen_body`), so the top bar and the system floor stay and the window keeps its size.
+  - `oled` is the default theme again; `telemetry` stays a valid theme (palette only), so a saved choice is not reset.
+  - The separate T-Box card and the expandable Vehicle info row are gone: one car card in the tray shows both, always. Its T-Box line keeps the 1.1.2 behaviour (carrier from the IMSI, redraw on every T-Box update).
+  - HUD and Cluster share one height in the tray; the HUD decodes with `preserve_aspect` and `Screen.show` letterboxes any frame whose ratio differs from its viewport. Touch maths uses `Screen.image_bounds`.
+  - RAM shows used/total (OLED Cinema) instead of a percentage (Telemetry). On Linux the PC row has no GPU meter.
+  - Safe rendering wraps the guarded stream callbacks: video capped at 12 fps, UI pump every 84 ms, no animations, no auto-connect.
+  - The Cluster relay fallback reaps the first relay on the stream thread and checks the stop flag before and after the second handshake, so the non-blocking `stop()` still holds.
+  - `tkinterdnd2` is imported inside the `try`: a source checkout without it still starts, with the file picker.

@@ -36,15 +36,28 @@ jobs:
           pip install -r requirements.txt pyinstaller pytest
       - name: Fetch scrcpy-server and adb
         run: python scripts/fetch_deps.py --os ${{ matrix.target }}
-      - name: Tests
+      - name: Tests (Windows, macOS)
+        if: matrix.target != 'linux'
         run: python -m pytest -q tests/test_core.py
+      - name: Tests (Linux, full suite under Xvfb, sealed)
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb fonts-noto-core > /dev/null
+          # Sealed: a fake adb answers everything, scratch HOME/config, so no real adb or device is touched.
+          fake="$RUNNER_TEMP/fakeadb"; mkdir -p "$fake" "$RUNNER_TEMP/home" "$RUNNER_TEMP/cfg"
+          printf '#!/bin/sh\n[ "$1" = version ] && echo "Android Debug Bridge version 1.0.41 (fake)"\nexit 0\n' > "$fake/adb"
+          chmod +x "$fake/adb"
+          for screen in 1920x1080 1024x768 1280x720 1366x768; do
+            env PATH="$fake:$PATH" ADB="$fake/adb" HOME="$RUNNER_TEMP/home" XDG_CONFIG_HOME="$RUNNER_TEMP/cfg" EX5_SCREEN=$screen \
+              xvfb-run -a -s "-screen 0 ${screen}x24" python -m pytest -q -p no:cacheprovider tests
+          done
       - name: Build
         run: pyinstaller --noconfirm ex5viewer.spec
 
       - name: Self-test (Linux)
         if: matrix.target == 'linux'
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb fonts-noto-core > /dev/null
+          test -x dist/GeelyCarViewer/_internal/resources/platform-tools/adb   # bundled adb made it in
           xvfb-run -s "-screen 0 1920x1080x24" dist/GeelyCarViewer/GeelyCarViewer --selftest --screenshot selftest-linux.png
       - name: Self-test (Windows)
         if: matrix.target == 'windows'

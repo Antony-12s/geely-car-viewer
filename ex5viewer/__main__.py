@@ -108,12 +108,11 @@ def main(argv=None):
     from .settings import Settings
     from .ui import App
 
-    from tkinterdnd2 import TkinterDnD
-
     root = tk.Tk()
-    try:
+    try:  # native file drop for the APK tab; without it the tab still opens the file picker
+        from tkinterdnd2 import TkinterDnD
         root.TkdndVersion = TkinterDnD._require(root)
-    except RuntimeError as error:
+    except (ImportError, RuntimeError) as error:
         logging.warning("Native file drop unavailable: %s", error.__cause__ or error)
     settings = Settings(paths.config_dir() / "selftest.json") if args.selftest else Settings()
     app = App(root, settings, selftest=args.selftest, safe_rendering=safe_rendering)

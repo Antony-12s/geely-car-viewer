@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.2.0
+
+Everything from 1.1.2 and 1.1.3 (APK install tab, HUD aspect ratio, Cluster on firmware 1.3, Linux safe rendering) is kept; the window around it is new.
+
+### New
+- **OLED Cinema layout**, now the default. A true-black window built around the car's main screen:
+  - **Main stage:** the main screen is the largest picture, centred, with its title, the **Control Main** switch and live stream details in the side columns
+  - **Aux tray** under the stage: HUD, Cluster and the car data card (battery and range, gear and speed, odometer, outside temperature, tire pressures, T-Box signal and carrier) side by side, always visible
+  - **System floor** at the bottom: PC and car CPU / GPU / RAM, and the network traffic of this app only
+- Clear view / control modes: with **Control Main** off (the default) clicks on the picture stay on the PC; when on, click and drag on Main touches the car screen. Only Main accepts touches.
+
+### Changed
+- The **APK** tab moved into the top bar, next to **Connect**. It opens the install workspace in place of the screens; the connection bar and the system floor stay visible. **Screens** goes back.
+- The 1.1.2 Telemetry window layout is replaced by OLED Cinema. Its colours remain as the **Telemetry** theme in ⚙ Settings. Saved settings are kept: if your settings were saved by 1.1.2 or 1.1.3, the new layout opens in the Telemetry colours until you pick **OLED** under ⚙ Settings → Theme.
+- Car data and T-Box status no longer hide behind a **Vehicle info** button: they sit in the tray. ⚙ **Car panel** still turns the card off.
+- HUD and Cluster sit side by side at the same height. The HUD keeps its source aspect ratio (from 1.1.2).
+- RAM shows used / total again (for example `12.8/31G`).
+- Drag-to-resize, size presets and all settings work as before and carry over from 1.1.x.
+- The settings panel drops down right under the ⚙ button.
+
+### Fixed
+- Cluster (JPEG mode): frames lagged by several seconds and, with long refresh times, the stream could time out and reconnect without ever showing a frame. Frames now show as soon as they arrive.
+- Disconnect, closing the window, or changing a stream setting could freeze the window for several seconds on a slow Wi-Fi link. Stream cleanup now runs in the background.
+- One unexpected error could silently stop the picture and the meters for good. The app now logs the error and keeps running.
+- Typing a wrong IP (or connecting by USB with no device) while connected stopped the streams but still showed "Live". The address is now checked first, and a working session is kept.
+- After a quick reconnect or a setting change, a late frame or status from the old stream could appear in the new session. Old streams can no longer update the screen.
+- Touch and drag on Main no longer stutter the whole window when the Wi-Fi link is congested; touch start and end are never dropped.
+- APK tab: long sentences in the target card were cut off in a small window. They now wrap.
+- The app starts even when the native drag-and-drop module is missing; the APK tab then uses the file picker.
+
 ## 1.1.3
 
 - Default to lower graphics load on Linux after Intel i915 reset failures. Request software GL, disable app animations, limit video to 12 fps, and wait for the user to connect.

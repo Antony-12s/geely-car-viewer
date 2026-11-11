@@ -7,17 +7,20 @@ import tkinter as tk
 from . import __version__
 from .widgets import PANEL_MS, RADIUS_CARD, Segmented, Switch, animate, round_rect
 
-INSET = 12  # content inset inside the rounded backdrop (equal to the radius: corners stay inside the curve)
-TOP = 90    # y of the panel's top edge, under the top bar
+INSET = 12  # content inset inside the rounded backdrop (more than the radius: corners stay inside the curve)
+RIGHT = 24  # right edge lines up with the page padding (the settings button)
 
 
 class SettingsPanel(tk.Frame):
     def __init__(self, app):
         pal, t = app.pal, app.t
-        super().__init__(app.root, bg=pal["panel2"], padx=20, pady=16)
+        super().__init__(app.root, bg=pal["panel"], padx=20, pady=16)
         self.app = app
         self.backdrop = tk.Canvas(app.root, bg=pal["bg"], highlightthickness=0)
-        self.place(relx=1.0, x=-16 - INSET, y=TOP + INSET, anchor="ne")
+        app.root.update_idletasks()  # drop down from just under the settings button, wherever the top bar ends
+        gear = app.gear
+        self.top = gear.winfo_rooty() - app.root.winfo_rooty() + gear.winfo_height() + 8
+        self.place(relx=1.0, x=-RIGHT - INSET, y=self.top + INSET, anchor="ne")
         head = tk.Frame(self, bg=self["bg"])
         head.pack(fill="x")
         tk.Label(head, text=t("settings"), bg=self["bg"], fg=pal["text"], font=app.f_title).pack(side="left")
@@ -35,7 +38,8 @@ class SettingsPanel(tk.Frame):
 
         self.group(left, t("g_general"))
         self.pick(left, t("s_language"), "language", [("th", "ไทย"), ("en", "English")])
-        self.pick(left, t("s_theme"), "theme", [("telemetry", "Telemetry"), ("oled", t("theme_oled")), ("dark", t("theme_dark"))])
+        self.pick(left, t("s_theme"), "theme", [("oled", t("theme_oled")), ("dark", t("theme_dark")),
+                                                ("telemetry", "Telemetry")])
         self.pick(left, t("s_size"), "size", [("auto", t("size_auto")), ("small", t("size_small")),
                                               ("medium", t("size_medium")), ("large", t("size_large"))])
         self.switch(left, t("s_topmost"), "topmost", t("s_topmost_sub"))
@@ -69,9 +73,9 @@ class SettingsPanel(tk.Frame):
         self.update_idletasks()
         w, h = self.winfo_reqwidth() + 2 * INSET, self.winfo_reqheight() + 2 * INSET
         self.backdrop.configure(width=w, height=h)
-        round_rect(self.backdrop, 0.5, 0.5, w - 0.5, h - 0.5, RADIUS_CARD, fill=pal["panel2"], outline=pal["line"],
+        round_rect(self.backdrop, 0.5, 0.5, w - 0.5, h - 0.5, RADIUS_CARD, fill=pal["panel"], outline=pal["line"],
                    width=1)
-        self.backdrop.place(relx=1.0, x=-16, y=TOP, anchor="ne")
+        self.backdrop.place(relx=1.0, x=-RIGHT, y=self.top, anchor="ne")
         self.lift()
         self._drop_in()
 
@@ -79,8 +83,8 @@ class SettingsPanel(tk.Frame):
         """Slide down into place (Tk frames have no opacity, so motion stands in for the fade)."""
         def step(e):
             offset = round(rise * (1 - e))
-            self.backdrop.place_configure(y=TOP - offset)
-            self.place_configure(y=TOP + INSET - offset)
+            self.backdrop.place_configure(y=self.top - offset)
+            self.place_configure(y=self.top + INSET - offset)
 
         animate(self, "drop", PANEL_MS, step)
 
@@ -120,7 +124,7 @@ class SettingsPanel(tk.Frame):
         pal = self.app.pal
         row = self.row(parent, label)
         var = tk.StringVar(value=str(self.app.s["port"]))
-        entry = tk.Entry(row, textvariable=var, width=7, bg=pal["bg"], fg=pal["text"], relief="flat",
+        entry = tk.Entry(row, textvariable=var, width=7, bg=pal["field"], fg=pal["text"], relief="flat",
                          insertbackground=pal["accent"], font=self.app.f_num, justify="center",
                          highlightthickness=1, highlightbackground=pal["line"], highlightcolor=pal["accent"])
         entry.pack(side="right", ipady=3)
