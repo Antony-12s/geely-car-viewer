@@ -85,15 +85,18 @@ class PipeSocket:
         return self.timeout
 
     def close(self):
+        """Kill the relay without waiting: stop() calls this on the Tk thread. reap() waits, on the stream thread."""
         if self.proc.poll() is None:
             self.proc.kill()
+        with self.cond:
+            self.closed = True
+            self.cond.notify_all()
+
+    def reap(self):
         try:
             self.proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
             pass
-        with self.cond:
-            self.closed = True
-            self.cond.notify_all()
 
 
 def open_transport(sock):
@@ -143,7 +146,13 @@ class JpegReader:
             if end >= 0:
                 frame, self.buffer = self.buffer[:end + 2], self.buffer[end + 2:]
                 return frame if frame[:2] == b"\xff\xd8" else None
-            chunk = self.stream.read1(65536) if hasattr(self.stream, "read1") else self.stream.read(65536)
+            # a paramiko Channel's recv returns what has arrived; its makefile's read(n) waits for all n bytes
+            if hasattr(self.stream, "recv"):
+                chunk = self.stream.recv(65536)
+            elif hasattr(self.stream, "read1"):
+                chunk = self.stream.read1(65536)
+            else:
+                chunk = self.stream.read(65536)
             if not chunk or len(self.buffer) > 8 * 1024 * 1024:
                 return None
             self.buffer += chunk
@@ -210,6 +219,7 @@ class ClusterStream(threading.Thread):
             finally:
                 if self._sock:
                     self._sock.close()
+                    self._sock.reap()
             if self.stop_event.is_set():
                 return
             if not self.reconnect:
@@ -229,8 +239,11 @@ class ClusterStream(threading.Thread):
         channel = transport.open_session(timeout=15)
         channel.settimeout(self.interval + 20)  # a stalled relay surfaces as a timeout, then a reconnect
         channel.exec_command(capture_script(ids[0], self.interval, jpeg))
-        stream = channel.makefile("rb")
-        next_frame = JpegReader(stream).read if jpeg else lambda: read_bmp(stream)
+        if jpeg:  # frames are small: read whatever arrived instead of waiting for 64 KiB
+            next_frame = JpegReader(channel).read
+        else:  # BMP reads exact sizes from the header
+            stream = channel.makefile("rb")
+            next_frame = lambda: read_bmp(stream)
         got_frame = False
         while not self.stop_event.is_set():
             data = next_frame()

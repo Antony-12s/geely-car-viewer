@@ -692,8 +692,7 @@ class App:
         self.update_conn_ui()
 
     def connect(self):
-        self.disconnect(quiet=True)
-        self.conn_error = None
+        # validate before tearing anything down: a typo must not drop a working session
         if self.s["link"] == "usb":
             serial = self.s["usb_serial"]
             if not serial:
@@ -703,8 +702,12 @@ class App:
             address = adb.parse_address(self.ip_var.get(), self.s["port"])
             if not address:
                 self.conn_label.configure(text=self.t("bad_ip"), fg=self.pal["bad"])
-                self.conn_error = "bad_ip"
+                if self.conn == "idle":  # a live session keeps its status line; the error would outlive it
+                    self.conn_error = "bad_ip"
                 return
+        self.disconnect(quiet=True)
+        self.conn_error = None
+        if address:
             self.s.set("address", self.ip_var.get().strip())
             serial = address
         self.generation += 1
@@ -754,18 +757,32 @@ class App:
         self.build()
         self.start_streams()
 
+    def stream_callbacks(self):
+        """(bind, on_frame, on_state) for one stream. Its frames and states reach the screens only while it is
+        still the current stream of its name: a stopped stream's late callbacks cannot repaint its successor."""
+        owner = []
+
+        def on_frame(name, image):
+            self.frame_from_worker(name, image, owner[0])
+
+        def on_state(name, state):
+            self.ui(lambda: self.streams.get(name) is owner[0] and self.set_state(name, state))
+        return owner.append, on_frame, on_state
+
     def start_streams(self):
         reconnect = self.s["auto_reconnect"]
-        frames_cb = self.frame_from_worker
-        state_cb = lambda name, state: self.ui(lambda: self.set_state(name, state))
         self.meters = {name: Meter() for name in ("main", "hud", "cluster")}
+        bind, frames_cb, state_cb = self.stream_callbacks()
         self.streams["main"] = VideoStream("main", self.serial, DISPLAYS["main"], lambda: self.sizes()["main"],
                                            frames_cb, state_cb, self.meters["main"], control=True,
                                            max_fps=self.s["max_fps"], reconnect=reconnect)
+        bind(self.streams["main"])
         if self.model == "EX5":
+            bind, frames_cb, state_cb = self.stream_callbacks()
             self.streams["hud"] = VideoStream("hud", self.serial, DISPLAYS["hud"], lambda: self.sizes()["hud"],
                                               frames_cb, state_cb, self.meters["hud"], max_fps=self.s["max_fps"],
                                               rotate_fn=lambda: self.s["rotate_hud"], reconnect=reconnect)
+            bind(self.streams["hud"])
             if self.s["cluster_refresh"]:
                 self.start_cluster()
             else:
@@ -775,9 +792,10 @@ class App:
                 self.streams[name].start()
 
     def start_cluster(self):
+        bind, frames_cb, state_cb = self.stream_callbacks()
         stream = ClusterStream(self.serial, self.s["cluster_interval"], lambda: self.sizes()["cluster"],
-                               self.frame_from_worker, lambda n, st: self.ui(lambda: self.set_state(n, st)),
-                               self.meters["cluster"], reconnect=self.s["auto_reconnect"])
+                               frames_cb, state_cb, self.meters["cluster"], reconnect=self.s["auto_reconnect"])
+        bind(stream)
         self.streams["cluster"] = stream
         stream.start()
 
@@ -937,10 +955,12 @@ class App:
         """Run task on the Tk thread; workers must never touch Tk directly."""
         self.ui_tasks.put(task)
 
-    def frame_from_worker(self, name, image):
-        self.frames[name] = image
+    def frame_from_worker(self, name, image, stream=None):
+        """stream: the sender; its frame is shown only while it is still the current stream of that name."""
+        self.frames[name] = (image, stream)
 
     def refresh(self):
+        self.root.after(15, self.refresh)  # first: one failing task must not stop the pump for good
         while True:
             try:
                 task = self.ui_tasks.get_nowait()
@@ -950,16 +970,31 @@ class App:
                 task()
             except tk.TclError:  # widget gone after a rebuild
                 pass
+            except Exception:
+                log.exception("ui task failed")
         for name in list(self.frames):
-            image = self.frames.pop(name, None)
+            item = self.frames.pop(name, None)
+            image, owner = item if isinstance(item, tuple) else (item, None)  # selftest writes bare images
             screen = self.screens.get(name)
-            if image is not None and screen and name in self.streams:
+            if image is None or not screen or name not in self.streams:
+                continue
+            if owner is not None and self.streams.get(name) is not owner:
+                continue  # late frame from a stopped stream
+            try:
                 screen.show(image)
                 screen.fps_count += 1
                 screen.last_frame_at = time.monotonic()
-        self.root.after(15, self.refresh)
+            except Exception:
+                log.exception("showing a %s frame failed", name)
 
     def tick(self):
+        self.root.after(1000, self.tick)  # first, like refresh
+        try:
+            self._tick()
+        except Exception:
+            log.exception("tick failed")
+
+    def _tick(self):
         down = up = 0
         for name, meter in self.meters.items():
             d, u = meter.take()
@@ -980,7 +1015,6 @@ class App:
             cluster.ago.configure(text=self.t("ago", s=f"{age:.0f}") if age is not None else "")
         if self.conn == "connected" and self.s["link"] == "wifi":
             self.update_conn_ui()
-        self.root.after(1000, self.tick)
 
     def draw_rates(self, now):
         pal = self.pal
@@ -1087,5 +1121,9 @@ class App:
             cells["RAM"].set(human_gb(used, total), used / total if total else None)
 
     def quit(self):
+        streams = [stream for stream in self.streams.values() if stream]
         self.stop_streams()
+        for stream in streams:  # best effort: let the stream threads remove their adb forwards
+            if stream.is_alive():
+                stream.join(0.5)
         self.root.destroy()
