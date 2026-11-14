@@ -104,7 +104,9 @@ def main(argv=None):
         os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
     setup_logging()
     if safe_rendering:
-        logging.info("Linux safe rendering enabled: software GL, no animations, video capped at 12 fps")
+        from .ui import SAFE_FPS, SAFE_REFRESH_MS
+        logging.info("Linux safe rendering enabled: software GL and video decode, no animations, video capped at "
+                     "%d fps, UI pump %d ms", SAFE_FPS, SAFE_REFRESH_MS)
     from .settings import Settings
     from .ui import App
 

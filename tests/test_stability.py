@@ -193,8 +193,10 @@ def test_safe_rendering_caps_fps_and_disables_animations(tmp_path, monkeypatch):
         assert "connect" not in scheduled(app)  # no auto-connect in safe mode
         assert app.conn == "idle"
         fake_connected(app)
-        assert app.streams["main"].kwargs["max_fps"] == ui.SAFE_FPS == 12
-        assert app.streams["hud"].kwargs["max_fps"] == 12
+        # GPU-freeze mitigation: 8 fps (was 12) and an ~125 ms UI pump
+        assert app.streams["main"].kwargs["max_fps"] == ui.SAFE_FPS == 8
+        assert app.streams["hud"].kwargs["max_fps"] == 8
+        assert app.refresh_ms == ui.SAFE_REFRESH_MS == 125
         app.frames["main"] = (Image.new("RGB", app.sizes()["main"], "blue"), app.streams["main"])
         pump(app, 0.3)  # the slower pump still shows frames
         assert app.screens["main"].has_frame

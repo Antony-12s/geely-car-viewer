@@ -12,6 +12,33 @@ NO_WINDOW = {"creationflags": 0x08000000} if sys.platform.startswith("win") else
 
 ADB = paths.find_adb()
 
+# Retry spacing after repeated failures (stream sessions, cluster relay, adb reconnect). A dropped car used to be
+# retried every 1-2 s, a reconnect storm that kept the CPU/GPU busy; consecutive failures now wait 4/8/16/30 s.
+BACKOFF = (4, 8, 16, 30)
+
+
+def retry_delay(failures):
+    """Seconds to wait after `failures` consecutive failures (1 -> 4 s, 2 -> 8 s, 3 -> 16 s, then 30 s)."""
+    return BACKOFF[min(max(failures, 1), len(BACKOFF)) - 1]
+
+
+class Backoff:
+    """Spacing for a repeated recovery action (the stats worker's `adb connect`): due() says whether to try now,
+    failed() pushes the next try out by retry_delay(), reset() after a success. `clock` is injectable for tests."""
+
+    def __init__(self, clock=time.monotonic):
+        self.clock, self.failures, self.next_at = clock, 0, 0.0
+
+    def due(self):
+        return self.clock() >= self.next_at
+
+    def failed(self):
+        self.failures += 1
+        self.next_at = self.clock() + retry_delay(self.failures)
+
+    def reset(self):
+        self.failures, self.next_at = 0, 0.0
+
 
 def run(*args, timeout=15, check=False):
     result = subprocess.run([ADB, *args], capture_output=True, text=True, errors="replace",

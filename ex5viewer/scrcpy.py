@@ -116,7 +116,7 @@ class VideoStream(threading.Thread):
 
     # ---- thread ----
     def run(self):
-        delay = 1
+        failures = 0  # consecutive sessions that never showed a frame
         while not self.stop_event.is_set():
             got_frame = False
             try:
@@ -132,8 +132,9 @@ class VideoStream(threading.Thread):
                 self.on_state(self.name_, "error")
                 return
             self.on_state(self.name_, "reconnecting")
-            delay = 1 if got_frame else min(delay * 2, 8)
-            self.stop_event.wait(delay)
+            # a stream that was live retries at once (Wi-Fi blip); repeated failures back off 4/8/16/30 s
+            failures = 0 if got_frame else failures + 1
+            self.stop_event.wait(1 if got_frame else adb.retry_delay(failures))
 
     def _session(self):
         scid = random.randrange(1, 0x7FFFFFFF)

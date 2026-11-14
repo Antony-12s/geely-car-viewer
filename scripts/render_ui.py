@@ -6,6 +6,7 @@
 Each spec: a name, then settings (size, language, model, theme, control, link) and `state=` idle|live|demo.
 "live"/"demo" fill the screens with the bundled selftest clip and the car panel with fictional values.
 `apk=true` opens the APK tab, `settings_open=true` the settings panel, `geometry=WxH` drags the window.
+`popout=main+hud` pops those screens out into their own windows (each window is saved as NAME-popout-SCREEN.png).
 """
 import json
 import sys
@@ -59,6 +60,7 @@ def render(out_dir, name, opts, clip):
     state = opts.pop("state", "idle")
     geometry = opts.pop("geometry", None)
     apk, settings_open = opts.pop("apk", False), opts.pop("settings_open", False)
+    popouts = [n for n in str(opts.pop("popout", "")).split("+") if n]
     with tempfile.TemporaryDirectory() as tmp:
         settings = Settings(Path(tmp) / "s.json")
         settings.update(auto_connect=False, address="192.0.2.25:5566", **opts)
@@ -86,12 +88,17 @@ def render(out_dir, name, opts, clip):
             app.streams = {n: None for n in app.screens}
             for n in app.screens:
                 app.set_state(n, "live")
-            sizes = app.sizes()
+            for n in popouts:
+                app.popout(n)
+            root.update()
+            time.sleep(0.3)  # let the pop-out windows map and settle their size
+            root.update()
             for i in range(20):
                 if frames_:
                     frame = frames_[i % len(frames_)]
-                    for n in app.screens:
-                        app.frames[n] = decoder.to_image(frame, *sizes[n], rotate180=n == "hud")
+                    for n in app.screens:  # decoded once, at the size of wherever the screen is shown
+                        app.frames[n] = decoder.to_image(frame, *app.view_size(n), rotate180=n == "hud",
+                                                         preserve_aspect=n == "hud")
                 root.update()
                 time.sleep(1 / 30)
             app.draw_rates(app.history.samples[-1])
@@ -110,10 +117,25 @@ def render(out_dir, name, opts, clip):
         x, y = root.winfo_rootx(), root.winfo_rooty()
         w, h = root.winfo_width(), root.winfo_height()
         path = out_dir / f"{name}.png"
+        for window in app.popouts.values():  # no window manager under Xvfb: windows stack at 0,0 over the app
+            window.top.withdraw()
+        root.update()
+        time.sleep(0.2)
         ImageGrab.grab(bbox=(x, y, x + w, y + h)).save(path)
+        for n, window in app.popouts.items():
+            top = window.top
+            top.deiconify()
+            top.lift()
+            root.update()
+            time.sleep(0.3)
+            root.update()
+            tx, ty = top.winfo_rootx(), top.winfo_rooty()
+            ImageGrab.grab(bbox=(tx, ty, tx + top.winfo_width(), ty + top.winfo_height())).save(
+                out_dir / f"{name}-popout-{n}.png")
         info = {"name": name, "window": [w, h], "req": [root.winfo_reqwidth(), root.winfo_reqheight()],
                 "size_name": app.size_name, "k": app.k, "sizes": app.sizes(), "theme": app.s["theme"],
-                "apk_tab": bool(app.apk_tab.winfo_ismapped()), "apk_open": app.apk_open}
+                "apk_tab": bool(app.apk_tab.winfo_ismapped()), "apk_open": app.apk_open,
+                "popouts": {n: list(window.screen.viewport) for n, window in app.popouts.items()}}
         app.quit()
         return info
 

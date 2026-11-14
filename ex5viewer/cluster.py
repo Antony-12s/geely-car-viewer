@@ -210,7 +210,7 @@ class ClusterStream(threading.Thread):
             self._sock.close()
 
     def run(self):
-        delay = 2
+        failures = 0  # consecutive sessions that never delivered a picture
         while not self.stop_event.is_set():
             got_frame = False
             try:
@@ -228,8 +228,9 @@ class ClusterStream(threading.Thread):
                 self.on_state("cluster", "error")
                 return
             self.on_state("cluster", "reconnecting" if got_frame else "error")
-            delay = 2 if got_frame else min(delay * 2, 16)
-            self.stop_event.wait(delay)
+            # repeated failures (car asleep, relay refused, SSH banner errors) back off 4/8/16/30 s, no storm
+            failures = 0 if got_frame else failures + 1
+            self.stop_event.wait(2 if got_frame else adb.retry_delay(failures))
 
     def _session(self):
         self._sock = PipeSocket(self.proxy_args, self.meter)

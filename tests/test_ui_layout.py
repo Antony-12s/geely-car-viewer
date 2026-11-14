@@ -1,4 +1,5 @@
-"""OLED Cinema layout (design A): centred Main stage, HUD/Cluster/car data in a lower tray, system floor.
+"""OLED Cinema layout (design A): centred Main stage with the car status rail on its right, HUD/Cluster in a
+lower tray, system floor.
 
 Needs a display (Xvfb is fine):  Xvfb :93 -screen 0 1920x1080x24 &  DISPLAY=:93 pytest tests/test_ui_layout.py
 adb is stubbed: these tests never start an adb process.
@@ -81,9 +82,14 @@ def test_main_is_centred_and_dominant(make_app, size):
     mx1, my1, mx2, my2 = box(main)
     centre = (mx1 + mx2) / 2
     assert abs(centre - root.winfo_width() / 2) <= 4, "Main is centred in the window"
-    assert (mx2 - mx1) >= 2 * (box(cluster)[2] - box(cluster)[0]), "Main dominates the auxiliary screens"
+    # the tray pictures grew (HUD was too small), so Main dominates by area rather than by 2x the width
+    area = lambda c: (box(c)[2] - box(c)[0]) * (box(c)[3] - box(c)[1])  # noqa: E731
+    assert area(main) >= 3 * area(cluster) and area(main) >= 3 * area(hud), "Main dominates the auxiliary screens"
+    assert (mx2 - mx1) > box(cluster)[2] - box(cluster)[0] > box(hud)[2] - box(hud)[0]
     assert box(hud)[1] > my2 and box(cluster)[1] > my2, "HUD and Cluster sit below Main"
-    assert box(app.car_panel)[1] > my2, "car data sits below Main"
+    px1, py1, px2, py2 = box(app.car_panel)
+    assert px1 >= mx2 and py1 < my2 and py2 > my1, "car status is a rail to the right of Main"
+    assert px2 <= root.winfo_width(), "the car rail stays inside the window"
     assert box(app.floor)[1] >= box(cluster)[3], "system floor is the bottom strip"
 
 

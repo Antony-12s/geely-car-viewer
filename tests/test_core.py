@@ -675,3 +675,89 @@ def test_cluster_falls_back_to_the_legacy_relay_and_still_stops_fast():
     stream.join(10)
     assert not stream.is_alive()
     assert states[:2] == ["connecting", "live"] and "dump surface 4711" in server.commands[2]
+
+
+# ---------- GPU-freeze mitigations: reconnect backoff, software decode ----------
+def test_retry_delay_backs_off_and_caps():
+    assert [adb.retry_delay(n) for n in range(1, 7)] == [4, 8, 16, 30, 30, 30]
+    assert adb.retry_delay(0) == 4
+
+
+def test_backoff_spaces_out_attempts():
+    now = [100.0]
+    backoff = adb.Backoff(clock=lambda: now[0])
+    assert backoff.due()
+    backoff.failed()
+    assert not backoff.due()
+    now[0] += 4
+    assert backoff.due()
+    backoff.failed()
+    now[0] += 7.9
+    assert not backoff.due()
+    now[0] += 0.2
+    assert backoff.due()
+    backoff.reset()
+    assert backoff.due() and backoff.failures == 0
+
+
+def _record_waits(stream, monkeypatch, sessions):
+    """Run a stream thread's loop in this thread with failing sessions; return the waits between them."""
+    waits = []
+    results = iter(sessions)
+
+    def session():
+        result = next(results)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def wait(seconds):
+        waits.append(seconds)
+        if len(waits) >= len(sessions):
+            stream.stop_event.set()
+        return stream.stop_event.is_set()
+
+    monkeypatch.setattr(stream, "_session", session)
+    monkeypatch.setattr(stream.stop_event, "wait", wait)
+    stream.run()
+    return waits
+
+
+def test_video_stream_backs_off_on_repeated_failures(monkeypatch):
+    stream = scrcpy.VideoStream("main", "serial", 0, lambda: (64, 40), lambda *a: None, lambda *a: None,
+                                stats.Meter())
+    monkeypatch.setattr(stream, "_cleanup", lambda: None)
+    fail = OSError("device not found")
+    waits = _record_waits(stream, monkeypatch, [fail, fail, fail, fail, fail, True, fail])
+    assert waits == [4, 8, 16, 30, 30, 1, 4]  # a live session resets the backoff
+
+
+def test_cluster_stream_backs_off_on_repeated_failures(monkeypatch):
+    stream = cluster.ClusterStream("serial", 3, lambda: (64, 18), lambda *a: None, lambda *a: None, None)
+    fail = OSError("Error reading SSH protocol banner")
+    waits = _record_waits(stream, monkeypatch, [fail, fail, fail, fail, True, fail])
+    assert waits == [4, 8, 16, 30, 2, 4]
+
+
+def test_stats_reconnect_is_backed_off(monkeypatch):
+    from ex5viewer import ui
+    calls = []
+    monkeypatch.setattr(adb, "connect", lambda address: calls.append(address) or (False, "refused"))
+    now = [0.0]
+    backoff = adb.Backoff(clock=lambda: now[0])
+    fake = type("FakeApp", (), {"s": {"auto_reconnect": True}})()
+    for _tick in range(30):  # 60 s of 2 s stats ticks with the car gone
+        ui.App.reconnect_car(fake, 5, "192.0.2.25:5566", backoff)
+        now[0] += 2
+    # attempts at 0, 4, 12, 28, 58 s: five, not thirty
+    assert len(calls) == 5
+    ui.App.reconnect_car(fake, 1, "192.0.2.25:5566", adb.Backoff())  # one missed sample: no reconnect yet
+    assert len(calls) == 5
+
+
+def test_decoder_is_software_only():
+    from ex5viewer import decoder
+    assert decoder.HWACCEL is None
+    dec = decoder.Decoder()
+    assert not getattr(dec.ctx, "is_hwaccel", False)
+    assert dec.ctx.codec.name == "h264"

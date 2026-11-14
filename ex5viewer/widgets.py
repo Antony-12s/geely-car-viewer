@@ -160,6 +160,12 @@ def draw_icon(canvas, kind, x, y, size, colour, width=1.5, tags=None):
             r = s * 0.17
             canvas.create_oval(x + s * knob - r, y + s * rail - r, x + s * knob + r, y + s * rail + r,
                                fill=canvas["bg"], outline=colour, width=w, **t)
+    elif kind == "popout":  # window with an arrow leaving its top-right corner
+        canvas.create_line(x + s * 0.45, y + s * 0.15, x, y + s * 0.15, x, y + s, x + s * 0.85, y + s,
+                           x + s * 0.85, y + s * 0.55, fill=colour, width=w, joinstyle="round", **t)
+        canvas.create_line(x + s * 0.4, y + s * 0.6, x + s, y, fill=colour, width=w, capstyle="round", **t)
+        canvas.create_line(x + s * 0.6, y, x + s, y, x + s, y + s * 0.4, fill=colour, width=w, capstyle="round",
+                           joinstyle="round", **t)
     elif kind == "pause":
         bar = s * 0.22
         canvas.create_rectangle(x + s * 0.2, y, x + s * 0.2 + bar, y + s, fill=colour, outline="", **t)

@@ -53,7 +53,7 @@ def test_connection_and_vehicle_details(tmp_path, monkeypatch, language):
     monkeypatch.setattr(ui.App, "stats_loop", lambda self: None)
     root, app = open_app(tmp_path, language=language, theme="telemetry")
     try:
-        assert app.car_panel.winfo_ismapped()  # vehicle details and T-Box: always visible in the tray
+        assert app.car_panel.winfo_ismapped()  # vehicle details and T-Box: always visible beside Main
         assert app.ip_entry.winfo_ismapped()
         hud, cluster, main = (app.screens[name].canvas for name in ("hud", "cluster", "main"))
         assert hud.winfo_rooty() == cluster.winfo_rooty() > main.winfo_rooty() + main.winfo_height() - 1

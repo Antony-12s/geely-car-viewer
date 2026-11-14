@@ -1,6 +1,8 @@
 """Geely Car Viewer window, "OLED cinema" layout: top bar (brand + status | connection, settings), a centred
-Main stage, a lower tray (HUD, Cluster, car data) and a quiet system floor (PC/car resources, app network).
-The APK tab swaps the stage and tray for the install workspace; the top bar and the floor stay."""
+Main stage with its side column on the left and the car status rail on the right, a lower tray (HUD, Cluster)
+and a quiet system floor (PC/car resources, app network). Every screen can pop out into its own window
+(popout.py); it then renders only there. The APK tab swaps the stage and tray for the install workspace; the top
+bar and the floor stay."""
 from contextlib import nullcontext
 import logging
 import os
@@ -13,7 +15,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
-from PIL import Image, ImageOps, ImageTk
+from PIL import Image, ImageTk
 
 from . import __version__, adb, paths, widgets
 from .cluster import ClusterStream
@@ -21,6 +23,7 @@ from .i18n import Translator
 from .settings import MAX_SCALE, MIN_SCALE
 from .scrcpy import TOUCH_DOWN, TOUCH_MOVE, TOUCH_UP, VideoStream
 from .carpanel import CarPanel
+from .popout import PopoutWindow
 from .vehicle import VehicleStats
 from .stats import CarStats, History, HostStats, Meter, human_gb, tcp_ping
 from .widgets import (GAP, PAGE, RADIUS_BEZEL, Card, Chip, Dot, IconButton, MiniMeter, Segmented, Switch, draw_icon,
@@ -30,15 +33,15 @@ log = logging.getLogger(__name__)
 
 # ---- "OLED cinema" geometry: everything below scales with k except text, bars and paddings ----
 MAIN_BASE = (704, 440)                     # Main picture at k = 1 (2560 × 1600, 16:10)
-SIDE_RATIO = 0.28                          # stage side column (title / control | note / stream) per Main width
-AUX_RATIO = 0.21                           # HUD / Cluster picture height per Main height (mockup 124 / 540)
+SIDE_RATIO = 0.31                          # stage side columns (Main title / control | car status rail) per Main width
+AUX_RATIO = 0.33                           # HUD / Cluster picture height per Main height (was 0.21: HUD too small)
 ROW_GAP = 10                               # stage -> tray -> floor
 ASPECT = {"hud": 800 / 480, "cluster": 1920 / 532}
-SCALE = {"small": 0.8, "medium": 1.1, "large": 1.375}  # small fits a 1024 px screen
+SCALE = {"small": 0.8, "medium": 1.0, "large": 1.375}  # small fits 1024 x 768, medium 1600 x 900
 DISPLAYS = {"main": 0, "hud": 1}           # Android display ids on the EX5
 INSET = 2                                  # picture inset inside a screen canvas (room for the control outline)
 PAD, HEAD = INSET, 0                       # picture offset inside a screen canvas: x/y inset, no heading row above it
-SAFE_FPS, SAFE_REFRESH_MS = 12, 84         # Linux safe rendering: video cap and UI pump interval (~12 paints/s)
+SAFE_FPS, SAFE_REFRESH_MS = 8, 125         # Linux safe rendering: video cap and UI pump interval (8 paints/s)
 TOP_H = 52                                 # top bar: brand + status | connection + settings
 CTRL_H = 34                                # height of the top bar controls
 AUX_PAD, AUX_HEAD, AUX_FOOT = 7, 22, 24    # tray card: inner padding, title row, footer row
@@ -46,6 +49,7 @@ FLOOR_H = 74                               # system floor (resources + app netwo
 TITLE_W = 112                              # left title column of the floor blocks
 GEAR = 34                                  # kept for callers that size against the settings button
 RADIUS = RADIUS_BEZEL                      # tray screen cards
+POP_BUTTON = 20                            # pop-out button in a tray card's title row
 
 
 def even(value):
@@ -73,8 +77,10 @@ class Screen:
         self.viewport = size               # picture area; a frame of another ratio is letterboxed inside it
         self.image_bounds = (0, 0, *size)  # x, y, width, height of the picture inside the viewport (touch maths)
         self.image = None                  # last frame: shown again after a rebuild
+        self.popped = False                # shown in a pop-out window: this slot only holds a placeholder
+        self._letterbox = self._letterbox_bounds = None  # reused frame buffer for pictures of another size
         pal, w, h = app.pal, *size
-        self.bg = bg
+        self.bg, self.bezel = bg, pal["bezel"]
         self.canvas = tk.Canvas(parent, width=w + 2 * INSET, height=h + 2 * INSET, bg=bg, highlightthickness=0)
         self.photo = ImageTk.PhotoImage(Image.new("RGB", size, pal["bezel"]))
         self.canvas.create_image(INSET, INSET, image=self.photo, anchor="nw", tags="frame")
@@ -84,13 +90,27 @@ class Screen:
         self.down_bytes = 0
 
     def show(self, image):
+        """Paint one frame. Allocation-free in steady state: the PhotoImage is made once per size, and a frame of
+        another size (HUD keeps its source ratio; a frame decoded for the previous size) is pasted into one reused
+        letterbox buffer whose bars are only repainted when the picture bounds change."""
         self.image = image
-        if image.size != self.viewport:  # HUD keeps its source ratio; or a frame decoded for the previous size
-            fitted = ImageOps.contain(image, self.viewport)
-            left, top = (self.viewport[0] - fitted.width) // 2, (self.viewport[1] - fitted.height) // 2
-            image = Image.new("RGB", self.viewport, self.app.pal["bezel"])
-            image.paste(fitted, (left, top))
-            self.image_bounds = (left, top, fitted.width, fitted.height)
+        if image.mode != "RGB":  # the PhotoImage is RGB: same mode = no per-frame conversion block
+            image = image.convert("RGB")
+        if image.size != self.viewport:
+            (vw, vh), (iw, ih) = self.viewport, image.size
+            scale = min(vw / iw, vh / ih)
+            fw, fh = max(1, min(vw, round(iw * scale))), max(1, min(vh, round(ih * scale)))
+            if (fw, fh) != image.size:
+                image = image.resize((fw, fh), Image.Resampling.BICUBIC)
+            bounds = ((vw - fw) // 2, (vh - fh) // 2, fw, fh)
+            if self._letterbox is None or self._letterbox.size != self.viewport:
+                self._letterbox, self._letterbox_bounds = Image.new("RGB", self.viewport, self.bezel), None
+            if self._letterbox_bounds != bounds:
+                self._letterbox.paste(self.bezel, (0, 0, vw, vh))
+                self._letterbox_bounds = bounds
+            self._letterbox.paste(image, bounds[:2])
+            self.image_bounds = bounds
+            image = self._letterbox
         else:
             self.image_bounds = (0, 0, *self.viewport)
         self.photo.paste(image)
@@ -98,12 +118,31 @@ class Screen:
             self.has_frame = True
             self.draw_message()
 
+    def resize(self, size):
+        """New picture size (pop-out window resized): one new PhotoImage, the last frame shown again."""
+        if size == self.size:
+            return
+        w, h = self.size = self.viewport = size
+        self.image_bounds = (0, 0, *size)
+        self._letterbox = self._letterbox_bounds = None
+        self.canvas.configure(width=w + 2 * INSET, height=h + 2 * INSET)
+        self.photo = ImageTk.PhotoImage(Image.new("RGB", size, self.bezel))
+        self.canvas.itemconfigure("frame", image=self.photo)
+        self.canvas.coords(self.outline, 1, 1, w + 2 * INSET - 1, h + 2 * INSET - 1)
+        image, self.has_frame = self.image, False
+        if image is not None:
+            self.show(image)
+        self.draw_message()
+
     def set_outline(self, colour, width):
         self.canvas.itemconfigure(self.outline, outline=colour, width=width)
 
     def draw_message(self):
         canvas, (w, h), pal, app, t = self.canvas, self.size, self.app.pal, self.app, self.app.t
         canvas.delete("message")
+        if self.popped:
+            self.draw_popped()
+            return
         key = {"idle": "msg_idle", "connecting": "msg_connecting", "reconnecting": "msg_reconnecting",
                "error": "msg_error", "paused": "msg_paused"}.get(self.state)
         if not key:
@@ -134,11 +173,34 @@ class Screen:
                                    justify="center", tags="message")
         canvas.tag_raise("outline")
 
+    def draw_popped(self):
+        """Placeholder while the screen renders in its own window: same slot size, so nothing around it moves."""
+        canvas, (w, h), pal, app, t = self.canvas, self.size, self.app.pal, self.app, self.app.t
+        self.photo.paste(Image.new("RGB", self.size, pal["bezel"]))
+        self.has_frame = False
+        cx, cy = INSET + w // 2, INSET + h // 2
+        big = h >= 200
+        if big:
+            draw_icon(canvas, "popout", cx - 11, cy - 40, 22, pal["muted"], width=1.6, tags="message")
+        canvas.create_text(cx, cy - (4 if big else 12), text=t("popped_title"), fill=pal["text"],
+                           font=app.f_body if big else app.f_small, width=w - 16, justify="center", tags="message")
+        if big:
+            canvas.create_text(cx, cy + 18, text=t("popped_hint"), fill=pal["muted"], font=app.f_small,
+                               width=w - 24, justify="center", tags="message")
+        label = canvas.create_text(cx, cy + (48 if big else 12), text=t("dock"), fill=pal["accent"],
+                                   font=app.f_small, tags=("message", "dock"))
+        x1, y1, x2, y2 = canvas.bbox(label)
+        round_rect(canvas, x1 - 10, y1 - 3, x2 + 10, y2 + 3, 6, fill=pal["accent_soft"], outline="",
+                   tags=("message", "dock"))
+        canvas.tag_raise(label)
+        canvas.tag_bind("dock", "<Button-1>", lambda _e: self.app.dock(self.name))
+        canvas.tag_raise("outline")
+
 
 class App:
     def __init__(self, root, settings, selftest=False, safe_rendering=False):
         self.root, self.s, self.selftest = root, settings, selftest
-        self.safe_rendering = safe_rendering  # Linux default: no animations, 12 fps video, slower UI pump
+        self.safe_rendering = safe_rendering  # Linux default: no animations, 8 fps video, 125 ms UI pump
         self.ui_tasks = queue.Queue()
         self.frames = {}                     # name -> newest PIL image (stream threads write)
         self.streams, self.meters = {}, {}
@@ -154,6 +216,9 @@ class App:
         self.last_metrics = (None, None)     # newest PC / car samples: shown again after a rebuild
         self.press = None
         self.screens = {}
+        self.refresh_ms = SAFE_REFRESH_MS if safe_rendering else 15  # UI pump: frames -> screens
+        self.popouts = {}                    # name -> PopoutWindow: that screen renders only in its own window
+        self.popout_buttons = {}
         self.settings_panel = None
         self.apk_open = self.apk_busy = False
         self.apk_paths = ()
@@ -195,6 +260,11 @@ class App:
         per_w, per_h = self.scale_terms()
         self.root.minsize(int(req_w - (k - MIN_SCALE) * per_w), int(req_h - (k - MIN_SCALE) * per_h))
         self._building = False
+        for name in list(self.popouts):  # pop-out windows survive a rebuild: new theme/language, or re-dock
+            if name in self.screens:
+                self.popouts[name].restyle()
+            else:  # EX5 -> EX2: that screen is gone
+                self.popouts.pop(name).destroy()
         if reopen:
             self.toggle_settings()
 
@@ -240,8 +310,10 @@ class App:
                 and self.root.winfo_reqheight() <= self.root.winfo_screenheight() - 90)
 
     def _build_widgets(self):
+        keep = {popout.top for popout in self.popouts.values()}
         for child in self.root.winfo_children():
-            child.destroy()
+            if child not in keep:
+                child.destroy()
         self.settings_panel = None
         self.t = Translator(self.s["language"])
         self.pal = pal = palette(self.s["theme"])
@@ -285,6 +357,62 @@ class App:
         return {"main": main,
                 "hud": (even(aux_h * ASPECT["hud"]), aux_h),
                 "cluster": (even(aux_h * ASPECT["cluster"]), aux_h)}
+
+    def view(self, name):
+        """The screen that renders `name` right now: its pop-out window's, or the docked one."""
+        popout = self.popouts.get(name)
+        return popout.screen if popout else self.screens.get(name)
+
+    def view_size(self, name):
+        """Decode size for a stream (called on the stream thread): one decode per stream, at the size of wherever
+        it is shown, never once for the window and again for the pop-out."""
+        popout = self.popouts.get(name)
+        return popout.screen.viewport if popout else self.sizes()[name]
+
+    # ---------- pop-out windows ----------
+    def toggle_popout(self, name):
+        if name in self.popouts:
+            self.dock(name)
+        else:
+            self.popout(name)
+
+    def popout(self, name):
+        """Detach a screen into its own window. The docked slot keeps its size and shows a placeholder; frames
+        go only to the window from now on."""
+        screen = self.screens.get(name)
+        if not screen or name in self.popouts:
+            return None
+        window = self.popouts[name] = PopoutWindow(self, name)
+        screen.popped = True
+        window.screen.state, window.screen.last_frame_at = screen.state, screen.last_frame_at
+        if screen.image is not None and self.conn == "connected":
+            window.screen.show(screen.image)
+        self.paint_state(window.screen)
+        screen.draw_message()
+        self.popout_buttons[name].set_active(True)
+        return window
+
+    def dock(self, name):
+        """Close the pop-out window (its close button calls this) and render in the main window again."""
+        window = self.popouts.pop(name, None)
+        if not window:
+            return
+        image = window.screen.image
+        window.destroy()
+        screen = self.screens.get(name)
+        if not screen:
+            return
+        screen.popped = False
+        screen.has_frame = False
+        if image is not None and self.conn == "connected" and screen.state != "idle":
+            screen.show(image)  # the last picture until the next frame (decoded at the docked size) arrives
+        self.paint_state(screen)
+        if name in self.popout_buttons:
+            self.popout_buttons[name].set_active(False)
+
+    def close_popouts(self):
+        for name in list(self.popouts):
+            self.dock(name)
 
     def page_width(self):
         """Width of every row: the stage (side column | Main | side column)."""
@@ -362,11 +490,13 @@ class App:
 
     # ---------- stage + tray ----------
     def build_screens(self):
+        """Stage row: Main's side column | Main | car status rail. Tray below: HUD and Cluster cards, centred."""
         pal, t, sizes = self.pal, self.t, self.sizes()
         page_w, side = self.page_width(), self.side_width()
         model = self.layout_model()
         old = self.screens
         self.screens = {}
+        self.popout_buttons = {}
 
         body = self.screen_body = tk.Frame(self.root, bg=pal["bg"])  # stage + tray; the APK workspace covers it
         body.pack()
@@ -382,57 +512,67 @@ class App:
         left.pack_propagate(False)
         main = self.add_screen(row, "main", sizes["main"], pal["bg"])
         main.canvas.grid(row=0, column=1)
-        right = tk.Frame(row, bg=pal["bg"], width=side, height=main_h)
+        right = self.car_rail = tk.Frame(row, bg=pal["bg"], width=side, height=main_h)
         right.grid(row=0, column=2)
         right.pack_propagate(False)
 
-        # left: what this is, and the one control that can touch the car
+        # left: what this is, the mode note, the pop-out button; at the bottom the stream numbers and the one
+        # control that can touch the car
+        wrap = side - 14
         head = tk.Frame(left, bg=pal["bg"])
-        head.pack(side="top", anchor="w", padx=(6, 0), pady=(24, 0))
+        head.pack(side="top", anchor="w", fill="x", padx=(6, 8), pady=(16, 0))
         tk.Label(head, text=t("main"), bg=pal["bg"], fg=pal["text"], font=self.f_stage).pack(anchor="w")
-        tk.Label(head, text=t("main_sub"), bg=pal["bg"], fg=pal["muted"], font=self.f_small).pack(anchor="w")
-        tk.Label(head, text="2560 × 1600", bg=pal["bg"], fg=pal["muted"], font=self.f_tiny).pack(anchor="w",
-                                                                                                 pady=(10, 0))
+        tk.Label(head, text=f"{t('main_sub')} · 2560 × 1600", bg=pal["bg"], fg=pal["muted"], font=self.f_tiny,
+                 wraplength=wrap, justify="left").pack(anchor="w")
+        self.stage_mode = tk.Label(head, bg=pal["bg"], fg=pal["text"], font=self.f_small, anchor="w",
+                                   justify="left", wraplength=wrap)
+        self.stage_mode.pack(anchor="w", pady=(12, 0))
+        self.stage_hint = tk.Label(head, bg=pal["bg"], fg=pal["muted"], font=self.f_tiny, anchor="w",
+                                   justify="left", wraplength=wrap)
+        self.stage_hint.pack(anchor="w", pady=(3, 0))
+        tk.Label(head, text=t("main_only"), bg=pal["bg"], fg=pal["muted"], font=self.f_tiny, anchor="w",
+                 justify="left", wraplength=wrap).pack(anchor="w", pady=(3, 0))
+        pop = IconButton(head, pal, pal["bg"], "popout", lambda: self.toggle_popout("main"), 26,
+                         text=t("popout"), font=self.f_tiny)
+        pop.pack(anchor="w", pady=(12, 0))
+        self.popout_buttons["main"] = pop
         control = tk.Frame(left, bg=pal["bg"])
-        control.pack(side="bottom", anchor="w", padx=(6, 0), pady=(0, 18))
+        control.pack(side="bottom", anchor="w", padx=(6, 0), pady=(0, 16))
         tk.Label(control, text=t("control_main"), bg=pal["bg"], fg=pal["text"], font=self.f_small,
-                 wraplength=side - 12, justify="left").pack(anchor="w", pady=(0, 8))
+                 wraplength=wrap, justify="left").pack(anchor="w", pady=(0, 6))
         self.control_var = tk.BooleanVar(value=self.s["control"])
         Switch(control, self.control_var, pal, self.set_control, bg=pal["bg"]).pack(anchor="w")
+        meta = tk.Frame(left, bg=pal["bg"])
+        meta.pack(side="bottom", anchor="w", padx=(6, 0), pady=(0, 12))
+        self.add_stream_status(main, meta, pal["bg"], stacked=True, anchor="w")
         for event in ("<ButtonPress-1>", "<B1-Motion>", "<ButtonRelease-1>"):
             main.canvas.bind(event, self.on_touch)
 
-        # right: model + mode note on top, live stream numbers at the bottom
-        note = tk.Frame(right, bg=pal["bg"])
-        note.pack(side="top", anchor="e", padx=(0, 6), pady=(24, 0))
-        self.stage_mode = tk.Label(note, bg=pal["bg"], fg=pal["text"], font=self.f_small, anchor="e",
-                                   justify="right", wraplength=side - 12)
-        self.stage_mode.pack(anchor="e")
-        self.stage_hint = tk.Label(note, bg=pal["bg"], fg=pal["muted"], font=self.f_small, anchor="e",
-                                   justify="right", wraplength=side - 12)
-        self.stage_hint.pack(anchor="e", pady=(4, 0))
-        tk.Label(note, text=t("main_only"), bg=pal["bg"], fg=pal["muted"], font=self.f_small, anchor="e",
-                 justify="right", wraplength=side - 12).pack(anchor="e", pady=(4, 0))
-        meta = tk.Frame(right, bg=pal["bg"])
-        meta.pack(side="bottom", anchor="e", padx=(0, 6), pady=(0, 18))
-        self.add_stream_status(main, meta, pal["bg"], stacked=True)
+        # right rail: car status beside Main (battery, range, gear/speed, tires, T-Box/GPS)
+        self.car_panel = None
+        if self.s["show_vehicle"]:
+            self.car_panel = CarPanel(self, right, side, main_h)
+            self.car_panel.pack(side="top")
+            self.car_panel.update_data(**self.car_data)
         self.apply_control_look()
 
-        # tray: HUD card, Cluster card, car data
-        tray = tk.Frame(body, bg=pal["bg"], width=page_w)
-        tray.pack(padx=PAGE, pady=(ROW_GAP, 0))
+        # tray: HUD and Cluster cards side by side, centred under Main
         card_h = AUX_PAD + AUX_HEAD + sizes["hud"][1] + 2 * INSET + AUX_FOOT
-        used = 0
+        tray = tk.Frame(body, bg=pal["bg"], width=page_w, height=card_h)
+        tray.pack(padx=PAGE, pady=(ROW_GAP, 0))
+        tray.pack_propagate(False)
+        cards = tk.Frame(tray, bg=pal["bg"])
+        cards.place(relx=0.5, y=0, anchor="n")
         if model == "EX5":
-            hud, foot = self.aux_card(tray, "hud", sizes["hud"], t("hud"), "HUD", "800 × 480", card_h)
+            hud, foot = self.aux_card(cards, "hud", sizes["hud"], t("hud"), "HUD", "800 × 480", card_h)
             hud.card.grid(row=0, column=0, sticky="n", padx=(0, GAP))
             rotated = f" · {t('rotated')}" if self.s["rotate_hud"] and self.size_name != "small" else ""
             tk.Label(foot, text=t("view_only") + rotated,
                      bg=pal["bezel"], fg=pal["muted"], font=self.f_tiny).pack(side="left")
             self.add_stream_status(hud, foot, pal["bezel"])
-            cluster, foot = self.aux_card(tray, "cluster", sizes["cluster"], t("cluster"), "Cluster", "1920 × 532",
+            cluster, foot = self.aux_card(cards, "cluster", sizes["cluster"], t("cluster"), "Cluster", "1920 × 532",
                                           card_h)
-            cluster.card.grid(row=0, column=1, sticky="n", padx=(0, GAP))
+            cluster.card.grid(row=0, column=1, sticky="n")
             interval = self.s["cluster_interval"]
             tk.Label(foot, text=t("refresh", s=f"{interval:g}"), bg=pal["bezel"], fg=pal["text"],
                      font=self.f_tiny).pack(side="left")
@@ -442,37 +582,29 @@ class App:
             self.add_stream_status(cluster, foot, pal["bezel"], fps=False)
             cluster.ago = tk.Label(foot, bg=pal["bezel"], fg=pal["muted"], font=self.f_tiny)
             cluster.ago.pack(side="right", padx=(0, 8))
-            used = int(hud.card["width"]) + int(cluster.card["width"]) + 2 * GAP
         else:  # EX2: no HUD; cluster path unknown
             width = sizes["hud"][0] + sizes["cluster"][0] + 4 * INSET + 4 * AUX_PAD + GAP
-            box = tk.Canvas(tray, width=width, height=card_h, bg=pal["bg"], highlightthickness=0)
-            box.grid(row=0, column=0, columnspan=2, sticky="n", padx=(0, GAP))
+            box = tk.Canvas(cards, width=width, height=card_h, bg=pal["bg"], highlightthickness=0)
+            box.grid(row=0, column=0, sticky="n")
             round_rect(box, 0.5, 0.5, width - 0.5, card_h - 0.5, RADIUS, fill=pal["bezel"], outline=pal["line"])
             box.create_text(AUX_PAD + 2, AUX_PAD + AUX_HEAD / 2, text=f"{t('cluster')} · {t('st_unsupported')}",
                             fill=pal["text"], font=self.f_caption, anchor="w")
             box.create_text(width / 2, card_h / 2, text=t("ex2_cluster_title"), fill=pal["text"], font=self.f_small)
             box.create_text(width / 2, card_h / 2 + 30, text=t("ex2_cluster_body") + "\n" + t("ex2_note"),
                             fill=pal["muted"], font=self.f_tiny, justify="center", width=width - 24)
-            used = width + GAP
-        self.car_panel = None
-        vehicle_w = page_w - used
-        if self.s["show_vehicle"] and vehicle_w > 200:
-            self.car_panel = CarPanel(self, tray, vehicle_w, card_h)
-            self.car_panel.grid(row=0, column=2, sticky="n")
-            self.car_panel.update_data(**self.car_data)
-        else:
-            tk.Frame(tray, bg=pal["bg"], width=max(1, vehicle_w), height=card_h).grid(row=0, column=2)
         # keep states across rebuilds (language/theme/size changes while streaming)
         for name, screen in self.screens.items():
+            screen.popped = name in self.popouts  # a popped screen keeps its slot and shows a placeholder
             if name in old:
                 screen.state = old[name].state
                 screen.last_frame_at = old[name].last_frame_at
-                if old[name].image is not None and self.conn == "connected":
+                if old[name].image is not None and self.conn == "connected" and not screen.popped:
                     screen.show(old[name].image)  # keep the picture while the next frame is on its way
+            self.popout_buttons[name].set_active(screen.popped)
             self.paint_state(screen)
 
     def aux_card(self, parent, name, size, title, sub, res, card_h):
-        """Rounded card: title row, picture, footer. Returns (screen, footer frame)."""
+        """Rounded card: title row (title, resolution, pop-out button), picture, footer. Returns (screen, footer)."""
         pal = self.pal
         width = size[0] + 2 * INSET + 2 * AUX_PAD
         card = tk.Canvas(parent, width=width, height=card_h, bg=pal["bg"], highlightthickness=0)
@@ -483,7 +615,11 @@ class App:
         if sub != title:
             card.create_text(card.bbox(title_item)[2] + 6, head_y, text=sub, fill=pal["muted"], font=self.f_tiny,
                              anchor="w")
-        card.create_text(width - AUX_PAD - 2, head_y, text=res, fill=pal["muted"], font=self.f_tiny, anchor="e")
+        pop = IconButton(card, pal, pal["bezel"], "popout", lambda: self.toggle_popout(name), POP_BUTTON)
+        card.create_window(width - AUX_PAD, head_y, window=pop, anchor="e")
+        card.create_text(width - AUX_PAD - POP_BUTTON - 8, head_y, text=res, fill=pal["muted"], font=self.f_tiny,
+                         anchor="e")
+        self.popout_buttons[name] = pop
         screen = self.add_screen(card, name, size, pal["bezel"])
         card.create_window(AUX_PAD, AUX_PAD + AUX_HEAD, window=screen.canvas, anchor="nw")
         foot = tk.Frame(card, bg=pal["bezel"], width=size[0], height=AUX_FOOT - 4)
@@ -498,32 +634,40 @@ class App:
         self.screens[name] = screen
         return screen
 
-    def add_stream_status(self, screen, parent, bg, fps=True, stacked=False):
-        """Dot + state, fps, bandwidth. stacked: Main's side column (state on its own line, numbers below)."""
+    def add_stream_status(self, screen, parent, bg, fps=True, stacked=False, anchor="e"):
+        """Dot + state, fps, bandwidth. stacked: Main's side column (state on its own line, numbers below);
+        anchor "w" lines them up from the left edge instead of the right one."""
         pal = self.pal
         font = self.f_small if stacked else self.f_tiny
+        side = "left" if anchor == "w" else "right"
         top = tk.Frame(parent, bg=bg)
-        top.pack(side="top" if stacked else "right", anchor="e")
+        top.pack(side="top" if stacked else "right", anchor=anchor)
         if stacked:
             nums = tk.Frame(parent, bg=bg)
-            nums.pack(side="top", anchor="e", pady=(4, 0))
+            nums.pack(side="top", anchor=anchor, pady=(4, 0))
         else:
             nums = top
         screen.bw_label = tk.Label(nums, bg=bg, fg=pal["down"], font=self.f_num if stacked else self.f_tiny,
-                                   anchor="e")
-        screen.bw_label.pack(side="right")
+                                   anchor=anchor)
         screen.fps_label = tk.Label(nums, bg=bg, fg=pal["muted"], font=self.f_num if stacked else self.f_tiny,
-                                    anchor="e")
+                                    anchor=anchor)
+        gap = (0, 8) if side == "right" else (8, 0)
+        if side == "right":
+            screen.bw_label.pack(side=side)
         if fps:  # the cluster sends one picture every few seconds: fps would only mislead
-            screen.fps_label.pack(side="right", padx=(0, 8))
+            screen.fps_label.pack(side=side, padx=gap if side == "right" else 0)
+        if side == "left":
+            screen.bw_label.pack(side=side, padx=gap)
         screen.state_label = tk.Label(top, bg=bg, fg=pal["text"], font=font)
-        if stacked:
+        screen.state_dot = Dot(top, pal, bg, 6)
+        if side == "left":
+            screen.state_dot.pack(side="left", padx=(1, 7))
+            screen.state_label.pack(side="left")
+        elif stacked:
             screen.state_label.pack(side="right")
-            screen.state_dot = Dot(top, pal, bg, 6)
             screen.state_dot.pack(side="right", padx=(0, 7))
         else:
             screen.state_label.pack(side="right", padx=(0, 8))
-            screen.state_dot = Dot(top, pal, bg, 6)
             screen.state_dot.pack(side="right", padx=(0, 6))
 
     # ---------- APK workspace ----------
@@ -891,6 +1035,10 @@ class App:
             self.history.mark_drop()
         screen.state = state
         self.paint_state(screen)
+        popout = self.popouts.get(name)
+        if popout:
+            popout.screen.state = state
+            self.paint_state(popout.screen)
 
     def update_conn_ui(self):
         pal, t = self.pal, self.t
@@ -1084,14 +1232,14 @@ class App:
         max_fps = min(self.s["max_fps"], SAFE_FPS) if self.safe_rendering else self.s["max_fps"]
         self.meters = {name: Meter() for name in ("main", "hud", "cluster")}
         bind, frames_cb, state_cb = self.stream_callbacks()
-        self.streams["main"] = VideoStream("main", self.serial, DISPLAYS["main"], lambda: self.sizes()["main"],
+        self.streams["main"] = VideoStream("main", self.serial, DISPLAYS["main"], lambda: self.view_size("main"),
                                            frames_cb, state_cb, self.meters["main"], control=True,
                                            max_fps=max_fps, reconnect=reconnect)
         bind(self.streams["main"])
         if self.model == "EX5":
             bind, frames_cb, state_cb = self.stream_callbacks()
             # the HUD decodes into its viewport keeping the source ratio (scrcpy.py: preserve_aspect)
-            self.streams["hud"] = VideoStream("hud", self.serial, DISPLAYS["hud"], lambda: self.sizes()["hud"],
+            self.streams["hud"] = VideoStream("hud", self.serial, DISPLAYS["hud"], lambda: self.view_size("hud"),
                                               frames_cb, state_cb, self.meters["hud"], max_fps=max_fps,
                                               rotate_fn=lambda: self.s["rotate_hud"], reconnect=reconnect)
             bind(self.streams["hud"])
@@ -1105,7 +1253,7 @@ class App:
 
     def start_cluster(self):
         bind, frames_cb, state_cb = self.stream_callbacks()
-        stream = ClusterStream(self.serial, self.s["cluster_interval"], lambda: self.sizes()["cluster"],
+        stream = ClusterStream(self.serial, self.s["cluster_interval"], lambda: self.view_size("cluster"),
                                frames_cb, state_cb, self.meters["cluster"], reconnect=self.s["auto_reconnect"])
         bind(stream)
         self.streams["cluster"] = stream
@@ -1122,6 +1270,8 @@ class App:
         self.generation += 1
         self.stop_streams()
         was = self.conn
+        if was != "idle":  # the car went away: pop-out windows close and their screens dock back
+            self.close_popouts()
         self.conn, self.serial, self.address, self.car_stats = "idle", None, None, None
         self.vehicle_stats = None
         if self.car_panel:
@@ -1151,9 +1301,12 @@ class App:
             self.set_state("cluster", "paused")
 
     def on_touch(self, event):
-        main, stream = self.screens.get("main"), self.streams.get("main")
+        main, stream = self.view("main"), self.streams.get("main")
         if not (main and stream and self.control_var.get()):
             return
+        widget = getattr(event, "widget", None)
+        if widget is not None and widget is not main.canvas:
+            return  # a press on the docked placeholder while Main is popped out
         image_x, image_y, width, height = main.image_bounds  # the picture itself, not its letterbox bars
         fx = (event.x - PAD - image_x) / width
         fy = (event.y - PAD - HEAD - image_y) / height
@@ -1274,7 +1427,7 @@ class App:
 
     def refresh(self):
         # first: one failing task must not stop the pump for good
-        self.root.after(SAFE_REFRESH_MS if self.safe_rendering else 15, self.refresh)
+        self.root.after(self.refresh_ms, self.refresh)
         while True:
             try:
                 task = self.ui_tasks.get_nowait()
@@ -1295,7 +1448,7 @@ class App:
             if owner is not None and self.streams.get(name) is not owner:
                 continue  # late frame from a stopped stream
             try:
-                screen.show(image)
+                self.view(name).show(image)  # the pop-out window when there is one, never both
                 screen.fps_count += 1
                 screen.last_frame_at = time.monotonic()
             except Exception:
@@ -1320,6 +1473,10 @@ class App:
                 screen.bw_label.configure(text=f"↓ {d * 8 / 1e6:.1f}" if live else "")
                 if live and name != "cluster":
                     screen.fps_label.configure(text=f"{screen.fps_count} fps")
+                popout = self.popouts.get(name)
+                if popout:
+                    popout.screen.bw_label.configure(text=screen.bw_label.cget("text"))
+                    popout.screen.fps_label.configure(text=screen.fps_label.cget("text"))
             if screen:
                 screen.fps_count = 0
         self.draw_rates(self.history.tick(down, up))
@@ -1358,6 +1515,7 @@ class App:
     def stats_loop(self):
         """Every 2 s: PC + car meters, ping, USB device list, and adb reconnect when the car vanished."""
         failures = 0
+        reconnect = adb.Backoff()  # adb connect after a drop: 4/8/16/30 s apart, not every 2 s (reconnect storm)
         while True:
             started = time.monotonic()
             host = self.host_stats.sample()
@@ -1371,13 +1529,27 @@ class App:
                     car = self.car_stats.sample()
                     ping = tcp_ping(address) if address else None
                     failures = 0 if car else failures + 1
-                    if failures >= 2 and address and self.s["auto_reconnect"]:
-                        adb.connect(address)  # Wi-Fi blip: adb drops the device and does not come back alone
+                    if car:
+                        reconnect.reset()
+                    self.reconnect_car(failures, address, reconnect)
             except Exception as error:
                 log.debug("stats: %s", error)
                 failures += 1
             self.ui(lambda h=host, c=car, p=ping, u=usb, f=failures: self.show_stats(h, c, p, u, f))
             time.sleep(max(0.5, 2 - (time.monotonic() - started)))
+
+    def reconnect_car(self, failures, address, backoff):
+        """Wi-Fi blip: adb drops the device and does not come back alone, so `adb connect` again - but spaced out
+        by `backoff`: a car that is gone must not be hammered every 2 s."""
+        if failures < 2 or not address or not self.s["auto_reconnect"] or not backoff.due():
+            return
+        # every attempt pushes the next one out; only a car sample that works again resets the spacing
+        # ("already connected to" does not prove the car answers)
+        backoff.failed()
+        try:
+            adb.connect(address)
+        except Exception as error:  # noqa: BLE001 - adb missing, timeout: same as a refused connect
+            log.debug("reconnect: %s", error)
 
     def vehicle_loop(self, generation, stats):
         """Car panel values in their own thread: car_service hangs while the car powers down,
@@ -1445,6 +1617,7 @@ class App:
             return
         streams = [stream for stream in self.streams.values() if stream]
         self.stop_streams()
+        self.close_popouts()
         for stream in streams:  # best effort: let the stream threads remove their adb forwards
             if stream.is_alive():
                 stream.join(0.5)
