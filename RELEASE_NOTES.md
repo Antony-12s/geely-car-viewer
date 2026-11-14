@@ -1,30 +1,24 @@
-## Geely Car Viewer 1.2.0
+## Geely Car Viewer 1.3.0
 
-A new window layout, plus six stability fixes. Everything added in 1.1.2 and 1.1.3 is still here: the APK install tab, the HUD aspect ratio fix, Cluster on firmware 1.3, and Linux safe rendering.
+Pop-out windows, car status beside the main screen, a bigger HUD, and lower graphics load on Linux.
 
 ### New
-- **OLED Cinema layout**, now the default. A true-black window built around the car's main screen:
-  - **Main stage:** the main screen is the largest picture, centred, with its title, the **Control Main** switch and live stream details in the side columns
-  - **Aux tray** under the stage: HUD, Cluster and the car data card (battery and range, gear and speed, odometer, outside temperature, tire pressures, T-Box signal and carrier) side by side, always visible
-  - **System floor** at the bottom: PC and car CPU / GPU / RAM, and the network traffic of this app only
-- Clear view / control modes: with **Control Main** off (the default) clicks on the picture stay on the PC; when on, click and drag on Main touches the car screen. Only Main accepts touches.
+- **Pop-out windows.** Main, HUD and Cluster can each open in their own resizable window that keeps the picture's aspect ratio. Main has a **Pop out** button in its side column; HUD and Cluster have an icon in their card header.
+  - While a screen is popped out it is shown only in its window. Its place in the main window keeps the same size and shows "Opened in a window" with a **Dock back** button.
+  - Closing the window, pressing Escape, **Dock back**, disconnecting or quitting puts the screen back.
+  - Popping out does not start a second stream.
 
 ### Changed
-- The **APK** tab is in the top bar, next to **Connect**. It opens the install workspace in place of the screens; **Screens** goes back.
-- The 1.1.2 Telemetry window layout is replaced by OLED Cinema. Its colours remain as the **Telemetry** theme in ⚙ Settings. Saved settings are kept: if your settings were saved by 1.1.2 or 1.1.3, the new layout opens in the Telemetry colours until you pick **OLED** under ⚙ Settings → Theme.
-- Car data and T-Box status are always visible in the tray (no **Vehicle info** button). HUD and Cluster sit side by side.
-- Drag-to-resize, size presets and all settings carry over from 1.1.x.
+- **Car status is now a column on the right of Main** (battery and range, gear and speed, tire pressures, T-Box signal, GPS). In a small window it hides the odometer and outside temperature lines.
+- **Bigger HUD and Cluster:** the tray under Main holds only these two, at about twice the area.
+- The **Medium** size preset is a little smaller so it still fits a 1600x900 screen. Drag the window corner to make it bigger.
 
 ### Fixed
-- Cluster (JPEG mode): frames lagged by several seconds and, with long refresh times, the stream could time out and reconnect without ever showing a frame. Frames now show as soon as they arrive.
-- Disconnect, closing the window, or changing a stream setting could freeze the window for several seconds on a slow Wi-Fi link. Stream cleanup now runs in the background.
-- One unexpected error could silently stop the picture and the meters for good. The app now logs the error and keeps running.
-- Typing a wrong IP (or connecting by USB with no device) while connected stopped the streams but still showed "Live". The address is now checked first, and a working session is kept.
-- After a quick reconnect or a setting change, a late frame or status from the old stream could appear in the new session. Old streams can no longer update the screen.
-- Touch and drag on Main no longer stutter the whole window when the Wi-Fi link is congested; touch start and end are never dropped.
+- Linux: lower sustained graphics load, aimed at the Intel i915 freeze that could lock the whole desktop: software video decoding only, 8 fps in safe rendering (was 12), and reused picture buffers.
+- When the car drops off the network, failed reconnects back off to 4, 8, 16, then 30 seconds instead of retrying every few seconds.
 
 > [!WARNING]
-> Linux still starts in the reduced graphics mode from 1.1.3 (software OpenGL, no app animations, video capped at 12 fps, no auto-connect: click **Connect**). Graphics driver compatibility varies by machine; a fix for the observed Intel i915 freeze has not been confirmed in an extended live session. `--no-linux-safe-rendering` turns the mode off.
+> Linux still starts in reduced graphics mode (software OpenGL, no app animations, video capped at 8 fps, no auto-connect: click **Connect**). The changes above lower the load behind the observed Intel i915 freeze, but the fix has not yet been confirmed in an extended live session. `--no-linux-safe-rendering` turns the mode off.
 
 Full history: [CHANGELOG.md](https://github.com/Antony-12s/geely-car-viewer/blob/main/CHANGELOG.md)
 

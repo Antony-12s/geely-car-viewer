@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.3.0
+
+### New
+- **Pop-out windows.** Main, HUD and Cluster can each open in their own resizable window that keeps the picture's aspect ratio. Main has a **Pop out** button in its side column; HUD and Cluster have an icon in their card header.
+  - While a screen is popped out it is shown only in its window. Its place in the main window keeps the same size and shows "Opened in a window" with a **Dock back** button, so nothing jumps around.
+  - Closing the window, pressing Escape, **Dock back**, disconnecting or quitting the app puts the screen back.
+  - Popping out does not start a second stream: each stream is still decoded once.
+
+### Changed
+- **Car status moved to a column on the right of Main.** Battery and range, gear and speed, tire pressures, T-Box signal and GPS sit beside the main screen. In a small window the column hides the odometer and outside temperature lines so nothing overlaps.
+- **Bigger HUD and Cluster.** With car status out of the tray, the tray holds only HUD and Cluster and both are about twice the area (HUD 240x144 at 1920x1080, was 170x102).
+- The **Medium** size preset is a little smaller so it still fits a 1600x900 screen with the bigger tray. On a 1920x1080 screen the window opens at 1192x808. Drag the window corner to make it bigger.
+
+### Fixed
+- Linux: lower sustained graphics load, aimed at the Intel i915 freeze that could lock the whole desktop after a while:
+  - Video is always decoded in software; the app refuses to use hardware decoding.
+  - Linux safe rendering caps video at 8 fps (was 12) and refreshes the window every 125 ms.
+  - The picture is drawn into reused buffers instead of new ones for every frame.
+- When the car drops off the network, failed reconnects now wait 4, 8, 16, then 30 seconds instead of retrying every few seconds. A stream that was live and then dropped still retries after 1 second (Main/HUD) or 2 seconds (Cluster).
+
 ## 1.2.0
 
 Everything from 1.1.2 and 1.1.3 (APK install tab, HUD aspect ratio, Cluster on firmware 1.3, Linux safe rendering) is kept; the window around it is new.

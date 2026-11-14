@@ -26,4 +26,4 @@ coll = COLLECT(exe, a.binaries, a.datas, name="GeelyCarViewer")
 if is_mac:
     app = BUNDLE(coll, name="GeelyCarViewer.app", icon="packaging/icon.icns",
                  bundle_identifier="com.antony12s.geelycarviewer",
-                 info_plist={"NSHighResolutionCapable": True, "CFBundleShortVersionString": "1.2.0"})
+                 info_plist={"NSHighResolutionCapable": True, "CFBundleShortVersionString": "1.3.0"})
